@@ -40,3 +40,11 @@ MongoDB Shell (`mongosh`) is a database client, not a server. Atlas hosts the se
 The application checks connectivity before accepting requests, bounds database waits, and closes its client on shutdown. `/ping-db` remains available for existing callers. Error responses do not expose connection details.
 
 If a database password has appeared in source code, rotate that password in Atlas and update the private `.env`. Removing it from the current file does not invalidate copies in Git history.
+
+## Code layout
+
+- `main.py` creates the API and registers routes.
+- `data/database.py` owns the shared async PyMongo connection and database dependency.
+- `routes/health.py` serves the status endpoints.
+
+Add database-backed routes using `Depends(get_database)` to reuse the application connection pool. The backend reads the project-root `.env`; it does not create a second local database connection.
