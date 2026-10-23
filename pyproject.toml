@@ -9,8 +9,12 @@ dependencies = [
     "pymongo>=4.19.0,<5",
     "uvicorn>=0.30,<1",
     "python-dotenv>=1,<2",
-    "passlib>=1.7.4",
-    "jwt>=1.4.0",
+    "pwdlib[argon2,bcrypt]>=0.3,<1",
+    "PyJWT>=2.10,<3",
+    "python-multipart>=0.0.20,<1",
+    "authlib>=1.6,<2",
+    "httpx>=0.28,<1",
+    "itsdangerous>=2.2,<3",
 ]
 
 [project.scripts]
@@ -19,3 +23,9 @@ virasatguide-backend = "virasatguide_backend:main"
 [build-system]
 requires = ["uv_build>=0.12.13,<0.13.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.16.0",
+    "pytest>=9.1.1",
+]

@@ -1,50 +1,55 @@
 # Virasat Guide Backend
 
-FastAPI backend with an asynchronous PyMongo connection to the MongoDB Atlas `virasat-guide` cluster. Requires Python 3.13 or later.
+## Run
 
-## Run locally
+Requires Python 3.13+ and a working MongoDB Atlas connection.
 
 ```sh
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+python -m pip install -e .
 cp .env.example .env
 ```
 
-On Windows, activate the environment with `.venv\Scripts\activate` and copy the environment template using your file manager or shell.
+Fill in `.env`:
 
-Edit your private `.env` and replace `<db_password>` with the Atlas database user's password. URL-encode special characters in the password. Allow your current machine's IP in Atlas → Database & Network Access.
-
-```sh
-uvicorn virasatguide_backend.main:app --reload --host 127.0.0.1 --port 8000
+```dotenv
+MONGODB_URI=your-mongodb-connection-string
+MONGODB_DB=virasatguide
+JWT_SECRET_KEY=your-random-secret-at-least-32-characters
+GOOGLE_CLIENT_ID=your-google-client-id
+GOOGLE_CLIENT_SECRET=your-google-client-secret
+GOOGLE_REDIRECT_URI=http://127.0.0.1:8000/auth/google/callback
+FRONTEND_URL=http://127.0.0.1:5173/src/dashboard/index.html
 ```
 
-- API documentation: http://127.0.0.1:8000/docs
-- Database health: http://127.0.0.1:8000/health
-- OpenAPI schema: http://127.0.0.1:8000/openapi.json
+Generate a JWT secret with `python -c "import secrets; print(secrets.token_urlsafe(32))"`. Allow your IP in Atlas network access. Keep `.env` private.
 
-A successful health check returns `{"status":"ok","database":"connected"}`. If the database becomes unavailable, the endpoint returns HTTP 503. Startup verifies Atlas access, and shutdown closes the connection.
+```sh
+python -m uvicorn virasatguide_backend.main:app --reload --host 127.0.0.1 --port 8000
+```
 
-Credentials belong only in your private `.env` or your hosting provider's secret environment variables. Never commit them. The existing local private `.env` can be reused; its `PORT` value is ignored because Uvicorn uses `--port`.
+API docs: http://127.0.0.1:8000/docs
 
-GitHub stores the source; running this backend creates the database connection. No online hosting or deployment is configured.
+In a second terminal, open the frontend repo and run `npm run dev`. Open http://127.0.0.1:5173/src/landing-page/index.html. Use `127.0.0.1` for both servers. Restart the backend after editing `.env`.
 
-MongoDB driver reference: https://www.mongodb.com/docs/languages/python/pymongo-driver/current/connect/
+## Google OAuth and JWT
 
-## Database choices
+In Google Cloud Console, configure the consent screen, create an OAuth **Web application** client, and add this authorized redirect URI:
 
-FastAPI serves HTTP requests; it is not an ORM. This starter uses the official async PyMongo driver directly. Keep it for now: there are no domain models or CRUD routes that would benefit from an additional ODM layer. Use Pydantic request/response models when adding those routes. Beanie can be reconsidered if document relationships and repeated model persistence logic become substantial.
+`http://127.0.0.1:8000/auth/google/callback`
 
-MongoDB Shell (`mongosh`) is a database client, not a server. Atlas hosts the server, so a local MongoDB Community Server installation is optional. For a local server, set `MONGODB_URI=mongodb://127.0.0.1:27017`.
+Add your Google account as a test user if the app is in testing mode. Put the client ID and secret in the backend `.env`.
 
-The application checks connectivity before accepting requests, bounds database waits, and closes its client on shutdown. `/ping-db` remains available for existing callers. Error responses do not expose connection details.
+Implemented `/auth/google/login` and `/auth/google/callback` with FastAPI and Authlib. The flow validates Google's ID token, state and nonce, and uses PKCE. It creates or finds the MongoDB user by Google account ID, sets a 30-minute JWT in an HttpOnly cookie, and redirects to the frontend dashboard. `/auth/google/status` checks configuration; failed sign-ins show a retry message. Google tokens and passwords are not stored.
 
-If a database password has appeared in source code, rotate that password in Atlas and update the private `.env`. Removing it from the current file does not invalidate copies in Git history.
+Password registration hashes passwords; `/auth/login` returns a bearer JWT. `/auth/me` accepts a valid bearer token or login cookie. JWTs require a valid signature, expiry, user and token version. `/auth/logout` revokes the user's existing tokens and clears the cookie. Cookie logout requires the configured frontend origin; CORS allows that origin. Accounts are not automatically linked by email.
 
-## Code layout
+## Test
 
-- `main.py` creates the API and registers routes.
-- `data/database.py` owns the shared async PyMongo connection and database dependency.
-- `routes/health.py` serves the status endpoints.
+```sh
+python -m pip install pytest httpx
+python -m pytest -q
+```
 
-Add database-backed routes using `Depends(get_database)` to reuse the application connection pool. The backend reads the project-root `.env`; it does not create a second local database connection.
+Tests simulate Google and MongoDB. The real Google consent step is completed in your browser.
