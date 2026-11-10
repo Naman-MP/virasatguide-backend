@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .data.database import lifespan
 from .routes.health import router as health_router
+from .routes.monuments import router as monuments_router
 from .routes.auth import router as auth_router
 
 from .routes.google_oauth import router as google_router, GoogleOAuthSessionMiddleware
@@ -17,6 +18,7 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 app = FastAPI(title="Virasat Guide API", lifespan=lifespan)
 app.include_router(auth_router)
 app.include_router(health_router)
+app.include_router(monuments_router)
 
 app.add_middleware(GoogleOAuthSessionMiddleware)
 app.include_router(google_router)
