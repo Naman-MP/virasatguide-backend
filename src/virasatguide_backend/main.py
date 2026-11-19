@@ -23,9 +23,12 @@ app.include_router(monuments_router)
 app.add_middleware(GoogleOAuthSessionMiddleware)
 app.include_router(google_router)
 
+allowed_origins = ["https://virasat-frontend-nu.vercel.app"]
 frontend_origin = get_frontend_origin()
-if frontend_origin:
-    app.add_middleware(
-        CORSMiddleware, allow_origins=[frontend_origin], allow_credentials=True,
-        allow_methods=["GET", "POST"], allow_headers=["Content-Type", "Authorization"],
-    )
+if frontend_origin and frontend_origin not in allowed_origins:
+    allowed_origins.append(frontend_origin)
+
+app.add_middleware(
+    CORSMiddleware, allow_origins=allowed_origins, allow_credentials=True,
+    allow_methods=["GET", "POST"], allow_headers=["Content-Type", "Authorization"],
+)
