@@ -36,8 +36,8 @@ def google_flow(client, monkeypatch):
     yield api, users, google, key
 
 
-def start(api):
-    response = api.get('/auth/google/login', follow_redirects=False)
+def start(api, purpose='login'):
+    response = api.get(f'/auth/google/{purpose}', follow_redirects=False)
     assert response.status_code == 302
     query = parse_qs(urlsplit(response.headers['location']).query)
     assert query['code_challenge_method'] == ['S256']
@@ -57,8 +57,8 @@ def set_token(google, key, query, **overrides):
 
 def test_google_login_profile_repeat_and_logout(google_flow):
     api, users, google, key = google_flow
-    for _ in range(2):
-        query = start(api)
+    for purpose in ('signup', 'login'):
+        query = start(api, purpose)
         set_token(google, key, query)
         response = api.get('/auth/google/callback', params={'state': query['state'][0], 'code': 'test-code'})
         assert response.status_code == 200, response.text
@@ -71,6 +71,26 @@ def test_google_login_profile_repeat_and_logout(google_flow):
     assert 'password' not in users.documents['google:12345']
     google.fetch_access_token.assert_awaited()
     assert google.fetch_access_token.call_args.kwargs['code_verifier']
+
+
+def test_new_google_account_must_explicitly_sign_up(google_flow):
+    api, users, google, key = google_flow
+    query = start(api)
+    set_token(google, key, query)
+    response = api.get('/auth/google/callback', params={'state': query['state'][0], 'code': 'test-code'})
+    assert response.status_code == 403
+    assert 'No VirasatGuide account found' in response.text
+    assert '/auth/google/signup' in response.text
+    assert response.headers['cache-control'] == 'no-store'
+    assert not users.documents
+    assert api.get('/auth/me').status_code == 401
+
+    query = start(api, 'signup')
+    set_token(google, key, query)
+    response = api.get('/auth/google/callback', params={'state': query['state'][0], 'code': 'test-code'})
+    assert response.status_code == 200
+    assert response.json()['access_token']
+    assert len(users.documents) == 1
 
 
 @pytest.mark.parametrize('overrides', [
@@ -125,7 +145,7 @@ def test_browser_cookie_redirect_profile_and_logout(google_flow, monkeypatch):
     api, users, google, key = google_flow
     destination = 'http://127.0.0.1:5173/src/dashboard/index.html'
     monkeypatch.setenv('FRONTEND_URL', destination)
-    query = start(api)
+    query = start(api, 'signup')
     set_token(google, key, query)
     response = api.get('/auth/google/callback', params={'state': query['state'][0], 'code': 'test'}, follow_redirects=False)
     assert response.status_code == 303
@@ -144,6 +164,19 @@ def test_browser_cookie_redirect_profile_and_logout(google_flow, monkeypatch):
     assert response.status_code == 200
     assert 'virasat_access_token' not in api.cookies
     assert api.get('/auth/me').status_code == 401
+
+
+def test_unknown_google_account_shows_signup_page_with_frontend_configured(google_flow, monkeypatch):
+    api, users, google, key = google_flow
+    monkeypatch.setenv('FRONTEND_URL', 'http://127.0.0.1:5173/src/dashboard/index.html')
+    query = start(api)
+    set_token(google, key, query)
+    response = api.get('/auth/google/callback', params={'state': query['state'][0], 'code': 'test'}, follow_redirects=False)
+    assert response.status_code == 403
+    assert '/auth/google/signup' in response.text
+    assert 'location' not in response.headers
+    assert 'virasat_access_token' not in api.cookies
+    assert not users.documents
 
 
 def test_cors_allows_only_configured_frontend(client):
@@ -204,3 +237,40 @@ def test_failed_browser_signin_returns_to_frontend(google_flow, monkeypatch, par
     assert response.headers['location'] == 'http://127.0.0.1:5173/src/dashboard/index.html?auth_error=' + code
     assert 'google_oauth' not in api.cookies
     google.fetch_access_token.assert_not_awaited()
+
+
+def test_production_rejects_local_or_malformed_callbacks(client, monkeypatch):
+    api, _ = client
+    monkeypatch.setenv('VERCEL_ENV', 'production')
+    monkeypatch.setenv('GOOGLE_CLIENT_ID', 'test-client')
+    monkeypatch.setenv('GOOGLE_CLIENT_SECRET', 'test-secret')
+    for uri in ['http://127.0.0.1:8000/auth/google/callback',
+                'https://localhost/auth/google/callback',
+                'https://backend.example/wrong-path',
+                'https://user:pass@backend.example/auth/google/callback',
+                'https://backend.example/auth/google/callback?redirect=other']:
+        monkeypatch.setenv('GOOGLE_REDIRECT_URI', uri)
+        assert api.get('/auth/google/status').json()['configured'] is False
+        assert api.get('/auth/google/login').status_code == 503
+
+
+def test_production_callback_and_cross_site_cookie(google_flow, monkeypatch):
+    api, _, google, key = google_flow
+    backend = 'https://virasatguide-backend-epsu.vercel.app'
+    frontend = 'https://virasat-frontend-nu.vercel.app'
+    monkeypatch.setenv('VERCEL_ENV', 'production')
+    monkeypatch.setenv('GOOGLE_REDIRECT_URI', backend + '/auth/google/callback')
+    monkeypatch.setenv('FRONTEND_URL', frontend + '/src/dashboard/index.html')
+    api.base_url = backend
+    query = start(api, 'signup')
+    assert query['redirect_uri'] == [backend + '/auth/google/callback']
+    set_token(google, key, query)
+    response = api.get('/auth/google/callback', params={'state': query['state'][0], 'code': 'test'}, follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers['location'] == frontend + '/src/dashboard/index.html'
+    cookie = next(v for v in response.headers.get_list('set-cookie') if v.startswith('virasat_access_token='))
+    assert 'SameSite=none' in cookie and 'Secure' in cookie and 'HttpOnly' in cookie
+    assert api.get('/auth/me', headers={'Origin': frontend}).status_code == 200
+    assert api.post('/auth/logout', headers={'Origin': 'https://attacker.example'}).status_code == 403
+    assert api.post('/auth/logout', headers={'Origin': frontend}).status_code == 200
+    assert api.get('/auth/me').status_code == 401

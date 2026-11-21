@@ -27,8 +27,10 @@ async def lifespan(app: FastAPI):
     try:
         await client.admin.command("ping")
         app.state.database = client[os.getenv("MONGODB_DB", "virasatguide")]
-        # Let MongoDB enforce unique usernames.
+        # Keep account and public monument IDs unique and fast to look up.
         await app.state.database.users.create_index("username", unique=True)
+        await app.state.database.monuments.create_index("id", unique=True)
+        await app.state.database.tour_stories.create_index("story_key", unique=True)
         yield
     finally:
         await client.close()

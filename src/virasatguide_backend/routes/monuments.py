@@ -2,13 +2,13 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel
 from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.errors import PyMongoError
 
 from virasatguide_backend.data.database import get_database
-from virasatguide_backend.data.monuments import list_monuments
+from virasatguide_backend.data.monuments import get_monument, get_monument_by_slugs, list_monuments
 
 router = APIRouter(prefix="/api/v1/monuments", tags=["Monuments"])
 Database = Annotated[AsyncDatabase, Depends(get_database)]
@@ -20,6 +20,7 @@ class MonumentCard(BaseModel):
     city: str
     location_tag: str
     cover_image: str
+    reference_text: str
 
 
 class MonumentPage(BaseModel):
@@ -45,3 +46,33 @@ async def get_monuments(
     except PyMongoError as exc:
         raise HTTPException(status_code=503, detail="Monument catalogue is unavailable") from exc
     return MonumentPage(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/{monument_id}", response_model=MonumentCard)
+async def get_monument_detail(
+    monument_id: Annotated[int, Path(ge=1)], database: Database,
+) -> MonumentCard:
+    """Return one monument for a selected discovery card."""
+    try:
+        monument = await get_monument(database, monument_id)
+    except PyMongoError as exc:
+        raise HTTPException(status_code=503, detail="Monument catalogue is unavailable") from exc
+    if monument is None:
+        raise HTTPException(status_code=404, detail="Monument not found")
+    return MonumentCard.model_validate(monument)
+
+
+@router.get("/{city_slug}/{monument_slug}", response_model=MonumentCard)
+async def get_monument_by_location(
+    city_slug: Annotated[str, Path(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", max_length=100)],
+    monument_slug: Annotated[str, Path(pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$", max_length=100)],
+    database: Database,
+) -> MonumentCard:
+    """Return a card by its city and monument URL names."""
+    try:
+        monument = await get_monument_by_slugs(database, city_slug, monument_slug)
+    except PyMongoError as exc:
+        raise HTTPException(status_code=503, detail="Monument catalogue is unavailable") from exc
+    if monument is None:
+        raise HTTPException(status_code=404, detail="Monument not found in this city")
+    return MonumentCard.model_validate(monument)

@@ -41,6 +41,10 @@ class MemoryMonuments:
             raise PyMongoError("database unavailable")
         return len(self._matching(query))
 
+    async def find_one(self, query, projection):
+        matches = self.find(query, projection).documents
+        return copy.deepcopy(matches[0]) if matches else None
+
     def find(self, query, projection):
         self.last_filter = query
         matches = self._matching(query)
@@ -80,9 +84,10 @@ def api(monkeypatch):
     ]
     db = MemoryDatabase(documents)
     app.dependency_overrides[database.get_database] = lambda: db
-    with TestClient(app) as client:
-        yield client, db
-    app.dependency_overrides.clear()
+    try:
+        yield TestClient(app), db
+    finally:
+        app.dependency_overrides.clear()
 
 
 def test_list_defaults_and_card_projection(api):
@@ -91,14 +96,14 @@ def test_list_defaults_and_card_projection(api):
     assert response.status_code == 200
     assert response.json() == {
         "items": [
-            {"id": 1, "name": "Taj Mahal", "city": "Agra", "location_tag": "Uttar Pradesh, India", "cover_image": "taj.jpg"},
-            {"id": 2, "name": "Red Fort", "city": "New Delhi", "location_tag": "Delhi, India", "cover_image": "red.jpg"},
-            {"id": 3, "name": "Qutub Minar", "city": "New Delhi", "location_tag": "Delhi, India", "cover_image": "qutub.jpg"},
-            {"id": 4, "name": "City Palace", "city": "Jaipur", "location_tag": "Rajasthan, India", "cover_image": "city.jpg"},
+            {"id": 1, "name": "Taj Mahal", "city": "Agra", "location_tag": "Uttar Pradesh, India", "cover_image": "taj.jpg", "reference_text": "private detail"},
+            {"id": 2, "name": "Red Fort", "city": "New Delhi", "location_tag": "Delhi, India", "cover_image": "red.jpg", "reference_text": "private detail"},
+            {"id": 3, "name": "Qutub Minar", "city": "New Delhi", "location_tag": "Delhi, India", "cover_image": "qutub.jpg", "reference_text": "private detail"},
+            {"id": 4, "name": "City Palace", "city": "Jaipur", "location_tag": "Rajasthan, India", "cover_image": "city.jpg", "reference_text": "private detail"},
         ],
         "total": 4, "page": 1, "page_size": 12,
     }
-    assert "reference_text" not in response.text
+    assert all(item["reference_text"] == "private detail" for item in response.json()["items"])
 
 
 @pytest.mark.parametrize(("search", "expected"), [
@@ -166,3 +171,78 @@ def test_database_error_returns_service_unavailable(monkeypatch):
         assert response.json() == {"detail": "Monument catalogue is unavailable"}
     finally:
         app.dependency_overrides.clear()
+
+
+def test_get_monument_detail(api):
+    client, _ = api
+    response = client.get("/api/v1/monuments/2")
+    assert response.status_code == 200
+    assert response.json() == {
+        "id": 2, "name": "Red Fort", "city": "New Delhi",
+        "location_tag": "Delhi, India", "cover_image": "red.jpg",
+        "reference_text": "private detail",
+    }
+
+
+@pytest.mark.parametrize("monument_id", ["0", "-1", "abc"])
+def test_get_monument_rejects_invalid_id(api, monument_id):
+    client, _ = api
+    assert client.get(f"/api/v1/monuments/{monument_id}").status_code == 422
+
+
+def test_get_monument_returns_404_for_unknown_id(api):
+    client, _ = api
+    assert client.get("/api/v1/monuments/999").status_code == 404
+
+
+def test_get_monument_handles_database_error(api):
+    client, db = api
+    async def fail(_query, _projection):
+        raise PyMongoError("database unavailable")
+    db.monuments.find_one = fail
+    response = client.get("/api/v1/monuments/1")
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Monument catalogue is unavailable"}
+
+
+def test_get_monument_by_city_and_name(api):
+    client, db = api
+    db.monuments.documents.extend([
+        {"id": 5, "name": "Gateway of India", "city": "Mumbai", "location_tag": "Maharashtra, India", "cover_image": "gateway.jpg", "reference_text": "Mumbai landmark"},
+        {"id": 6, "name": "India Gate", "city": "New Delhi", "location_tag": "Delhi, India", "cover_image": "india-gate.jpg", "reference_text": "Delhi landmark"},
+    ])
+    mumbai = client.get("/api/v1/monuments/mumbai/gateway-of-india")
+    assert mumbai.status_code == 200
+    assert mumbai.json()["name"] == "Gateway of India"
+    assert mumbai.json()["city"] == "Mumbai"
+    delhi = client.get("/api/v1/monuments/new-delhi/india-gate")
+    assert delhi.status_code == 200
+    assert delhi.json()["name"] == "India Gate"
+    assert delhi.json()["city"] == "New Delhi"
+    assert client.get("/api/v1/monuments/mumbai/india-gate").status_code == 404
+
+
+@pytest.mark.parametrize("path", [
+    "mumbai/unknown-monument", "unknown-city/gateway-of-india",
+])
+def test_get_monument_by_slugs_returns_404_for_unknown_pair(api, path):
+    client, _ = api
+    assert client.get(f"/api/v1/monuments/{path}").status_code == 404
+
+
+@pytest.mark.parametrize("path", [
+    "Mumbai/india-gate", "mumbai/india_gate", "mumbai/" + "a" * 101,
+])
+def test_get_monument_by_slugs_rejects_invalid_segments(api, path):
+    client, _ = api
+    assert client.get(f"/api/v1/monuments/{path}").status_code == 422
+
+
+def test_get_monument_by_slugs_handles_database_error(api):
+    client, db = api
+    def fail(_query, _projection):
+        raise PyMongoError("database unavailable")
+    db.monuments.find = fail
+    response = client.get("/api/v1/monuments/mumbai/gateway-of-india")
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Monument catalogue is unavailable"}

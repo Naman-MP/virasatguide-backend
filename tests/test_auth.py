@@ -100,7 +100,7 @@ def test_database_lifecycle(monkeypatch, failure):
     import asyncio
     monkeypatch.setenv('MONGODB_URI', 'mongodb://localhost')
     monkeypatch.setenv('JWT_SECRET_KEY', 'test-only-signing-secret-at-least-32-characters')
-    fake_db = SimpleNamespace(users=SimpleNamespace(create_index=AsyncMock()))
+    fake_db = SimpleNamespace(users=SimpleNamespace(create_index=AsyncMock()), monuments=SimpleNamespace(create_index=AsyncMock()), tour_stories=SimpleNamespace(create_index=AsyncMock()))
     class Client:
         admin = SimpleNamespace(command=AsyncMock(side_effect=ConnectionFailure('offline') if failure else None))
         close = AsyncMock()
@@ -118,6 +118,8 @@ def test_database_lifecycle(monkeypatch, failure):
             async with database.lifespan(app_stub):
                 assert app_stub.state.database is fake_db
             fake_db.users.create_index.assert_awaited_once_with('username', unique=True)
+            fake_db.monuments.create_index.assert_awaited_once_with('id', unique=True)
+            fake_db.tour_stories.create_index.assert_awaited_once_with('story_key', unique=True)
         client.close.assert_awaited_once()
         assert app_stub.state.database is None
     asyncio.run(check())

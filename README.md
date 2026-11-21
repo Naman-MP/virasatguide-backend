@@ -41,15 +41,66 @@ In Google Cloud Console, configure the consent screen, create an OAuth **Web app
 
 Add your Google account as a test user if the app is in testing mode. Put the client ID and secret in the backend `.env`.
 
-Implemented `/auth/google/login` and `/auth/google/callback` with FastAPI and Authlib. The flow validates Google's ID token, state and nonce, and uses PKCE. It creates or finds the MongoDB user by Google account ID, sets a 30-minute JWT in an HttpOnly cookie, and redirects to the frontend dashboard. `/auth/google/status` checks configuration; failed sign-ins show a retry message. Google tokens and passwords are not stored.
+Implemented `/auth/google/login`, `/auth/google/signup`, and `/auth/google/callback` with FastAPI and Authlib. The flow validates Google's ID token, state and nonce, and uses PKCE. Sign-in only accepts an existing MongoDB user matched by Google account ID. If no account exists, the callback shows a sign-up page with a link to `/auth/google/signup`; that explicit flow creates the account after Google verification. Successful authentication sets a 30-minute JWT in an HttpOnly cookie and redirects to the frontend dashboard. `/auth/google/status` checks configuration. Google tokens and passwords are not stored.
 
 Password registration hashes passwords; `/auth/login` returns a bearer JWT. `/auth/me` accepts a valid bearer token or login cookie. JWTs require a valid signature, expiry, user and token version. `/auth/logout` revokes the user's existing tokens and clears the cookie. Cookie logout requires the configured frontend origin; CORS allows that origin. Accounts are not automatically linked by email.
 
 ## Test
 
 ```sh
-python -m pip install pytest httpx
-python -m pytest -q
+uv sync
+uv run pytest -q
 ```
 
 Tests simulate Google and MongoDB. The real Google consent step is completed in your browser.
+
+## Monument discovery
+
+`GET /api/v1/monuments?search=fort&city=New%20Delhi&page=1&page_size=12` returns `items`, `total`, `page`, and `page_size`. Omit any filter to list all monuments. `search` matches the name, city, or location tag without case sensitivity; `city` is an exact city filter without case sensitivity. Results are ordered by numeric ID. Page numbers start at 1, and page size is limited to 50. The route is public.
+
+`GET /api/v1/monuments/1` returns one monument with `id`, `name`, `city`, `location_tag`, `cover_image`, and `reference_text`. An unknown ID returns 404, an invalid ID returns 422, and a database outage returns 503. The route is public.
+
+`GET /api/v1/monuments/{city-slug}/{monument-slug}` also returns one card by city and monument name. For example, `/api/v1/monuments/mumbai/gateway-of-india` and `/api/v1/monuments/new-delhi/india-gate` work with the current catalogue. The city and name must both match; `/api/v1/monuments/mumbai/india-gate` returns 404. Slugs are lowercase words joined by hyphens.
+
+The frontend can debounce input (for example, wait 300 ms after the last keystroke) and cancel an older fetch with `AbortController`. Every request is independent, so the endpoint also works with a dedicated search service later.
+
+## Monument story AI agent
+
+The small LangGraph project is in `ai_agent/`. It validates the selected monument's database fields, searches DuckDuckGo (then Bing if needed), and asks your local Ollama model to write a spoken story. The graph has two steps: research and write. Web search snippets are supporting context, not verified historical facts.
+
+Set `OLLAMA_MODEL` in `.env` to the exact model tag you have installed, then start Ollama. `OLLAMA_BASE_URL` defaults to `http://127.0.0.1:11434`. Install the workspace with `uv sync`; if you use pip, install both packages with `python -m pip install -e ./ai_agent` followed by `python -m pip install -e .`.
+
+In `/docs`, use **Authorize** with a registered username and password before trying the story endpoint. For a command-line request, send the bearer token returned by `POST /auth/login` in the `Authorization: Bearer <token>` header. A request without a token returns 401.
+
+An authenticated `POST /api/v1/monuments/7/story` looks up monument 7 in MongoDB and returns `monument_id`, `story`, `sources`, and `research_status`. The frontend should call this endpoint when the user opens a monument. It is separate from the existing monument card endpoint, so discovery remains fast. Generated stories are saved in MongoDB's `tour_stories` collection. Reopening the same monument with the same model and monument details returns the saved story; changing the model or monument details generates and saves a new one. The narration is cleaned into plain text before it is saved, so newline and tab escape sequences do not appear in the story. The plain story text is used by the audio endpoint below.
+
+## Monument audio (Fish Audio)
+
+Add `FISH_AUDIO_API_KEY` to the backend `.env`. Optionally set `FISH_AUDIO_VOICE_ID` to a Fish Audio voice model ID; if omitted, Fish Audio chooses its default voice. Restart the backend after changing `.env`.
+
+First call authenticated `POST /api/v1/monuments/{id}/story` to save the story. Then call authenticated `POST /api/v1/monuments/{id}/audio` to receive an MP3 response (`audio/mpeg`). The audio route reads that saved story and sends its cleaned text to Fish Audio using the `s2.1-pro-free` model. A monument without a saved story returns 404. The MP3 is returned directly and is not stored in MongoDB, so another audio request generates it again.
+
+For example, after signing in and generating the story:
+
+```sh
+curl -X POST http://127.0.0.1:8000/api/v1/monuments/3/audio \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -o monument-3.mp3
+```
+
+## Tour follow-ups, itinerary planning and PDF export
+
+The authenticated `/api/v1/travel` router uses Ollama, the saved monument story and web search. See [the travel API guide](docs/travel-api.md) for endpoint payloads, architecture, budgets, location behavior and PDF downloads.
+
+## Production Google sign-in
+
+Set these in the backend Vercel project's Production environment, then redeploy:
+
+```dotenv
+GOOGLE_REDIRECT_URI=https://virasatguide-backend-epsu.vercel.app/auth/google/callback
+FRONTEND_URL=https://virasat-frontend-nu.vercel.app/src/dashboard/index.html
+```
+
+Register the identical HTTPS callback under the matching Google Cloud OAuth client's authorized redirect URIs. Local callbacks are rejected when `VERCEL_ENV=production`. The login cookie uses Secure, HttpOnly and SameSite=None for the separate HTTPS frontend and backend domains. Local HTTP development uses SameSite=Lax. Cookie-authenticated writes require the configured frontend Origin. Browser policies that block third-party cookies can still affect cross-site sign-in.
+
+To run every feature against actual services, configure Atlas, local Ollama and Fish Audio, then run `uv run python scripts/smoke_backend.py`. It uses a disposable QA database, exercises account access, monument discovery, stories, MP3 output, tour questions, three-pair retention, trip plans, ownership and PDF export, then removes its test database. Artifacts are written to `/private/tmp/virasat-backend-qa` by default. `uv run pytest -q` runs the deterministic suite without external services.

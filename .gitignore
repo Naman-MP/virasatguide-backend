@@ -6,3 +6,9 @@ __pycache__/
 .env.*
 !.env.example
 *.log
+
+# The editable system prompt is private.
+prompts/travel_system.txt
+
+.DS_Store
+/output/

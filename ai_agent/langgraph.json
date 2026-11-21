@@ -1,0 +1,6 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "monument_story": "./src/virasatguide_ai_agent/graph.py:graph"
+  }
+}

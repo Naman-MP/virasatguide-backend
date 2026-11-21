@@ -1,0 +1,15 @@
+[project]
+name = "virasatguide-ai-agent"
+version = "0.1.0"
+description = "Small LangGraph monument story agent for VirasatGuide"
+requires-python = ">=3.13"
+dependencies = [
+    "langgraph>=1.2,<2",
+    "langchain-ollama>=1.1,<2",
+    "ddgs>=9,<10",
+    "pydantic>=2,<3",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.13,<0.13.0"]
+build-backend = "uv_build"

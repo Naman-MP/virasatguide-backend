@@ -5,7 +5,7 @@ from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 from authlib.integrations.starlette_client import OAuth, OAuthError
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from httpx import HTTPError
 from joserfc.errors import JoseError
 from pymongo.errors import DuplicateKeyError
@@ -13,7 +13,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from virasatguide_backend.data.database import get_users_collection
 from virasatguide_backend.data.security import (
-    AUTH_COOKIE, ACCESS_TOKEN_EXPIRE_MINUTES, create_access_token, get_secret_key, get_frontend_url,
+    AUTH_COOKIE, ACCESS_TOKEN_EXPIRE_MINUTES, create_access_token, get_secret_key, get_frontend_url, get_frontend_origin,
 )
 
 router = APIRouter(prefix="/auth/google", tags=["Authentication"])
@@ -37,16 +37,24 @@ class GoogleOAuthSessionMiddleware:
         await middleware(scope, receive, send)
 
 
+def get_google_redirect_uri() -> str:
+    value = os.getenv("GOOGLE_REDIRECT_URI", "").strip()
+    parsed = urlsplit(value)
+    local = parsed.hostname in {"localhost", "127.0.0.1", "::1"}
+    if (not parsed.netloc or parsed.username or parsed.password or parsed.query or parsed.fragment
+        or parsed.path != "/auth/google/callback"
+        or (parsed.scheme != "https" and not (parsed.scheme == "http" and local))):
+        raise HTTPException(503, "Set GOOGLE_REDIRECT_URI to the backend's /auth/google/callback URL")
+    if os.getenv("VERCEL_ENV") == "production" and (local or parsed.scheme != "https"):
+        raise HTTPException(503, "Production GOOGLE_REDIRECT_URI must use the live HTTPS backend, not localhost")
+    return value
+
+
 def get_google_client():
     client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
     client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
-    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "")
-    parsed = urlsplit(redirect_uri)
-    if not client_id or not client_secret or not parsed.netloc or (
-        parsed.scheme != "https" and not (
-            parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1"}
-        )
-    ):
+    get_google_redirect_uri()
+    if not client_id or not client_secret:
         raise HTTPException(503, "Configure Google OAuth credentials and redirect URI")
     oauth = OAuth()
     return oauth.register(
@@ -82,12 +90,33 @@ def oauth_failure(request: Request, status: int, code: str, message: str):
     return JSONResponse({"detail": message}, status_code=status, headers={"Cache-Control": "no-store"})
 
 
-@router.get("/login")
-async def google_login(request: Request, google=Depends(get_google_client)):
+async def start_google_flow(request: Request, google, purpose: str):
+    request.session["purpose"] = purpose
     try:
-        return await google.authorize_redirect(request, os.environ["GOOGLE_REDIRECT_URI"])
+        return await google.authorize_redirect(request, get_google_redirect_uri())
     except (HTTPError, OAuthError):
         return oauth_failure(request, 502, "unavailable", "Google sign-in is temporarily unavailable")
+
+
+@router.get("/login")
+async def google_login(request: Request, google=Depends(get_google_client)):
+    return await start_google_flow(request, google, "login")
+
+
+@router.get("/signup")
+async def google_signup(request: Request, google=Depends(get_google_client)):
+    return await start_google_flow(request, google, "signup")
+
+
+def signup_required():
+    return HTMLResponse(
+        "<html><body><h1>No VirasatGuide account found</h1>"
+        "<p>Sign up with this Google account to finish creating your account.</p>"
+        '<p><a href="/auth/google/signup">Continue with Google to sign up</a></p>'
+        "</body></html>",
+        status_code=403,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/callback")
@@ -102,6 +131,7 @@ async def google_callback(
         return oauth_failure(request, 400, code, "Google sign-in failed; please start again")
     except HTTPError:
         return oauth_failure(request, 502, "unavailable", "Google sign-in is temporarily unavailable")
+    purpose = request.session.get("purpose")
     request.session.clear()
     info = token.get("userinfo") or {}
     subject = info.get("sub")
@@ -111,6 +141,8 @@ async def google_callback(
     username = "google:" + subject
     user = await users.find_one({"username": username})
     if user is None:
+        if purpose != "signup":
+            return signup_required()
         user = {
             "username": username, "google_sub": subject, "email": info.get("email"),
             "name": info.get("name"), "token_version": 1,
@@ -125,9 +157,13 @@ async def google_callback(
     frontend_url = get_frontend_url()
     if frontend_url:
         response = RedirectResponse(frontend_url, status_code=303, headers={"Cache-Control": "no-store"})
+        backend = urlsplit(get_google_redirect_uri())
+        secure = backend.scheme == "https"
+        cross_origin = get_frontend_origin() != f"{backend.scheme}://{backend.netloc}"
         response.set_cookie(
-            AUTH_COOKIE, access_token, httponly=True, secure=os.environ["GOOGLE_REDIRECT_URI"].startswith("https://"),
-            samesite="lax", max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60, path="/",
+            AUTH_COOKIE, access_token, httponly=True, secure=secure,
+            samesite="none" if secure and cross_origin else "lax",
+            max_age=ACCESS_TOKEN_EXPIRE_MINUTES * 60, path="/",
         )
         return response
     return JSONResponse(
