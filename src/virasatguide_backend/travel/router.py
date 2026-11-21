@@ -22,8 +22,8 @@ router = APIRouter(prefix="/api/v1/travel", tags=["Travel"], responses={
     404: {"description": "Resource not found for this user."},
     409: {"description": "Another question is being saved or a request ID was reused."},
     502: {"description": "The model returned invalid output."},
-    503: {"description": "Database, destination research or Ollama is unavailable."},
-    504: {"description": "Ollama timed out."},
+    503: {"description": "Database, destination research or configured AI providers are unavailable."},
+    504: {"description": "The final AI provider call timed out."},
 })
 
 

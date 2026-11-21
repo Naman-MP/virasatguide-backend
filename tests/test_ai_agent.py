@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from virasatguide_ai_agent import MonumentContext, StoryResult, generate_story
-from virasatguide_ai_agent.graph import AgentError, make_model
+from virasatguide_ai_agent.graph import AgentError
 from virasatguide_ai_agent.models import Source
 from virasatguide_ai_agent.tools import search_monument
 from virasatguide_backend.data.database import get_database, get_users_collection
@@ -82,20 +82,6 @@ def test_graph_rejects_empty_model_output():
     model = SimpleNamespace(ainvoke=AsyncMock(return_value=SimpleNamespace(content="  ")))
     with pytest.raises(AgentError, match="empty story"):
         asyncio.run(generate_story(MONUMENT, model=model, search=lambda *_: []))
-
-
-def test_ollama_model_name_is_required_and_validated(monkeypatch):
-    import virasatguide_ai_agent.graph as graph
-    monkeypatch.delenv("OLLAMA_MODEL", raising=False)
-    with pytest.raises(AgentError, match="OLLAMA_MODEL"):
-        make_model()
-    monkeypatch.setenv("OLLAMA_MODEL", "llama-test")
-    monkeypatch.setenv("OLLAMA_THINK", "false")
-    monkeypatch.setattr(graph, "ChatOllama", lambda **kwargs: kwargs)
-    config = make_model()
-    assert config["model"] == "llama-test"
-    assert config["validate_model_on_init"] is True
-    assert config["reasoning"] is False
 
 
 def test_search_prefers_duckduckgo_and_falls_back_to_bing(monkeypatch):

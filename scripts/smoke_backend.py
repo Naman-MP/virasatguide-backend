@@ -1,4 +1,4 @@
-"""Opt-in full API smoke test with Atlas, Ollama, search and Fish Audio.
+"""Opt-in full API smoke test with Atlas, configured AI providers, search and Fish Audio.
 
 Run with `uv run python scripts/smoke_backend.py`. It creates a disposable
 MongoDB database, seeds public monument records, and removes that database
@@ -84,7 +84,7 @@ def main():
             assert api.post(f"/api/v1/monuments/{mid}/story").status_code == 401
             passed("real account registration, duplicate protection, login and authentication")
 
-            print("Generating a real Ollama story...", flush=True)
+            print("Generating a real AI story...", flush=True)
             story = checked(api.post(f"/api/v1/monuments/{mid}/story", headers=headers)).json()
             assert story["story"] and "\n" not in story["story"] and "\\n" not in story["story"]
             cached = checked(api.post(f"/api/v1/monuments/{mid}/story", headers=headers)).json()

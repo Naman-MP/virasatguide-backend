@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/v1/monuments", tags=["AI agent"])
     responses={
         401: {"description": "Sign in required. Use Swagger's Authorize button or send a bearer token."},
         404: {"description": "Monument not found."},
-        503: {"description": "The monument database or Ollama model is unavailable."},
+        503: {"description": "The monument database or configured AI providers are unavailable."},
     },
 )
 async def create_monument_story(

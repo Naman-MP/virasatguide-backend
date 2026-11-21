@@ -66,13 +66,13 @@ The frontend can debounce input (for example, wait 300 ms after the last keystro
 
 ## Monument story AI agent
 
-The small LangGraph project is in `ai_agent/`. It validates the selected monument's database fields, searches DuckDuckGo (then Bing if needed), and asks your local Ollama model to write a spoken story. The graph has two steps: research and write. Web search snippets are supporting context, not verified historical facts.
+The small LangGraph project is in `ai_agent/`. It validates the selected monument's database fields, searches DuckDuckGo (then Bing if needed), and asks Gemini (or the Ollama fallback) to write a spoken story. The graph has two steps: research and write. Web search snippets are supporting context, not verified historical facts.
 
-Set `OLLAMA_MODEL` in `.env` to the exact model tag you have installed, then start Ollama. `OLLAMA_BASE_URL` defaults to `http://127.0.0.1:11434`. Install the workspace with `uv sync`; if you use pip, install both packages with `python -m pip install -e ./ai_agent` followed by `python -m pip install -e .`.
+Set `GEMINI_API_KEY` in the backend environment to use Gemini first. `GEMINI_MODEL` defaults to `gemini-3.5-flash-lite`. Ollama is the fallback: set `OLLAMA_MODEL` to your installed tag (locally, `qwen3:8b`), `OLLAMA_BASE_URL` (locally, `http://127.0.0.1:11434`) and optionally `OLLAMA_THINK=false`. Without a Gemini key, Ollama is used directly. A protected hosted Ollama server can use `OLLAMA_API_KEY`. Install the workspace with `uv sync`; if you use pip, install both packages with `python -m pip install -e ./ai_agent` followed by `python -m pip install -e .`.
 
 In `/docs`, use **Authorize** with a registered username and password before trying the story endpoint. For a command-line request, send the bearer token returned by `POST /auth/login` in the `Authorization: Bearer <token>` header. A request without a token returns 401.
 
-An authenticated `POST /api/v1/monuments/7/story` looks up monument 7 in MongoDB and returns `monument_id`, `story`, `sources`, and `research_status`. The frontend should call this endpoint when the user opens a monument. It is separate from the existing monument card endpoint, so discovery remains fast. Generated stories are saved in MongoDB's `tour_stories` collection. Reopening the same monument with the same model and monument details returns the saved story; changing the model or monument details generates and saves a new one. The narration is cleaned into plain text before it is saved, so newline and tab escape sequences do not appear in the story. The plain story text is used by the audio endpoint below.
+An authenticated `POST /api/v1/monuments/7/story` looks up monument 7 in MongoDB and returns `monument_id`, `story`, `sources`, and `research_status`. The frontend should call this endpoint when the user opens a monument. It is separate from the existing monument card endpoint, so discovery remains fast. Generated stories are saved in MongoDB's `tour_stories` collection. Reopening the same monument with the same provider/model configuration and monument details returns the saved story; changing the provider/model configuration or monument details generates and saves a new one. The narration is cleaned into plain text before it is saved, so newline and tab escape sequences do not appear in the story. The plain story text is used by the audio endpoint below.
 
 ## Monument audio (Fish Audio)
 
@@ -90,7 +90,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/monuments/3/audio \
 
 ## Tour follow-ups, itinerary planning and PDF export
 
-The authenticated `/api/v1/travel` router uses Ollama, the saved monument story and web search. See [the travel API guide](docs/travel-api.md) for endpoint payloads, architecture, budgets, location behavior and PDF downloads.
+The authenticated `/api/v1/travel` router uses Gemini first, Ollama as the fallback, the saved monument story and web search. See [the travel API guide](docs/travel-api.md) for endpoint payloads, architecture, budgets, location behavior and PDF downloads.
 
 ## Production Google sign-in
 
@@ -104,3 +104,10 @@ FRONTEND_URL=https://virasat-frontend-nu.vercel.app/src/dashboard/index.html
 Register the identical HTTPS callback under the matching Google Cloud OAuth client's authorized redirect URIs. Local callbacks are rejected when `VERCEL_ENV=production`. The login cookie uses Secure, HttpOnly and SameSite=None for the separate HTTPS frontend and backend domains. Local HTTP development uses SameSite=Lax. Cookie-authenticated writes require the configured frontend Origin. Browser policies that block third-party cookies can still affect cross-site sign-in.
 
 To run every feature against actual services, configure Atlas, local Ollama and Fish Audio, then run `uv run python scripts/smoke_backend.py`. It uses a disposable QA database, exercises account access, monument discovery, stories, MP3 output, tour questions, three-pair retention, trip plans, ownership and PDF export, then removes its test database. Artifacts are written to `/private/tmp/virasat-backend-qa` by default. `uv run pytest -q` runs the deterministic suite without external services.
+
+
+## Production AI configuration
+
+The backend source is deployed through GitHub/Vercel. Set `GEMINI_API_KEY` and `GEMINI_MODEL` in the backend Vercel project's Production environment, then redeploy. The primary Gemini path does not need Ollama hosting. For a working production fallback, also set `OLLAMA_BASE_URL` to a hosted HTTPS Ollama-compatible service, `OLLAMA_MODEL` to a model installed there and, if needed, `OLLAMA_API_KEY` for bearer authentication. Localhost on Vercel cannot access this Mac. Provider keys must never be frontend variables or committed files.
+
+The same shared client validates output for stories, questions and plans. Provider timeouts, HTTP failures and invalid output trigger the configured fallback; provider refusals are not bypassed. The complete configuration and frontend integration contract are in [docs/travel-api.md](docs/travel-api.md). A successful `/health` checks MongoDB, not model readiness. After adding the real Gemini key, run an authenticated generation to verify the key/model/quota before declaring production AI ready.

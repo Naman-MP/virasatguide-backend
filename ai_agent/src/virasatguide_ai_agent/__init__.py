@@ -1,4 +1,4 @@
-"""Monument story generation using LangGraph and Ollama."""
+"""Monument story generation using LangGraph, Gemini and Ollama."""
 
 from .graph import generate_story
 from .models import MonumentContext, StoryResult

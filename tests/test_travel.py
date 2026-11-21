@@ -17,6 +17,7 @@ from pymongo.errors import PyMongoError
 from pypdf import PdfReader
 
 from virasatguide_ai_agent import StoryResult
+from virasatguide_ai_agent import providers
 from virasatguide_backend.data.database import get_database, get_users_collection
 from virasatguide_backend.main import app
 from virasatguide_backend.routes.auth import get_current_user
@@ -194,7 +195,7 @@ def test_ollama_error_mapping(monkeypatch, mode, code):
         if mode == "offline": raise httpx.ConnectError("offline")
         return httpx.Response(404 if mode == "missing" else 200, json={"message": {"content": "{}"}})
     transport = httpx.MockTransport(handle)
-    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **kw: original(transport=transport, **kw))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", lambda **kw: original(transport=transport, **kw))
     with pytest.raises(HTTPException) as error:
         asyncio.run(llm.generate_json(AnswerDraft, "Answer", {}))
     assert error.value.status_code == code
@@ -271,7 +272,7 @@ def test_ollama_accepts_validated_json(monkeypatch):
         assert payload["stream"] is False
         assert payload["think"] is False
         return httpx.Response(200, json={"message": {"content": '{"answer":"Known fact", "evidence_ids":["reference-1"], "supported":true}'}})
-    monkeypatch.setattr(llm.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handle), **kw))
+    monkeypatch.setattr(providers.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handle), **kw))
     assert asyncio.run(llm.generate_json(AnswerDraft, "Answer", {})).answer == "Known fact"
 
 
@@ -285,3 +286,48 @@ def test_plan_rejects_invented_venue_and_repairs_once(api, monkeypatch):
     assert response.status_code == 201
     assert generate.await_count == 2
     assert "validation_feedback" in generate.call_args.args[2]
+
+
+@pytest.mark.parametrize("fallback", [False, True])
+def test_plan_endpoint_uses_shared_primary_and_fallback_provider(api, monkeypatch, fallback):
+    import json
+    client, _ = api
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(planner, "generate_json", llm.generate_json)
+    original = httpx.AsyncClient
+    seen = []
+    def handle(request):
+        seen.append(request.url.host)
+        if request.url.host == "generativelanguage.googleapis.com":
+            body = json.loads(request.content)
+            assert body["generationConfig"]["responseJsonSchema"] == PlanDraft.model_json_schema()
+            if fallback: return httpx.Response(429)
+            return httpx.Response(200, json={"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": draft().model_dump_json()}]}}]})
+        return httpx.Response(200, json={"message": {"content": draft().model_dump_json()}})
+    monkeypatch.setattr(providers.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handle), **kw))
+    response = client.post("/api/v1/travel/plans", json={"destination": "Agra", "budget": 1000})
+    assert response.status_code == 201, response.text
+    assert response.json()["estimated_total"] == 700
+    assert response.json()["budget_status"] == "within_budget"
+    plan_id = response.json()["plan_id"]
+    assert client.get(f"/api/v1/travel/plans/{plan_id}/pdf").headers["content-type"] == "application/pdf"
+    assert seen == ["generativelanguage.googleapis.com"] + (["127.0.0.1"] if fallback else [])
+
+
+def test_question_endpoint_uses_gemini_with_retrieved_evidence(api, monkeypatch):
+    import json
+    client, _ = api
+    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
+    monkeypatch.setattr(retrieval, "generate_json", llm.generate_json)
+    original = httpx.AsyncClient
+    def handle(request):
+        context = json.loads(json.loads(request.content)["contents"][0]["parts"][0]["text"])
+        assert "Shah Jahan" in str(context)
+        result = {"answer": "Shah Jahan commissioned it.", "evidence_ids": ["reference-1"], "supported": True}
+        return httpx.Response(200, json={"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": json.dumps(result)}]}}]})
+    monkeypatch.setattr(providers.httpx, "AsyncClient", lambda **kw: original(transport=httpx.MockTransport(handle), **kw))
+    session_id = client.post("/api/v1/travel/tour-sessions", json={"monument_id": 1}).json()["session_id"]
+    response = client.post(f"/api/v1/travel/tour-sessions/{session_id}/questions", json={"question": "Who commissioned it?"})
+    assert response.status_code == 200, response.text
+    assert response.json()["supported"] is True
+    assert response.json()["evidence"][0]["id"] == "reference-1"
