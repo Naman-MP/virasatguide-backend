@@ -286,6 +286,7 @@ def test_plan_rejects_invented_venue_and_repairs_once(api, monkeypatch):
     assert response.status_code == 201
     assert generate.await_count == 2
     assert "validation_feedback" in generate.call_args.args[2]
+    assert generate.call_args.args[2]["previous_draft"]["days"][0]["stops"][0]["place_name"] == "Invented Palace Restaurant"
 
 
 @pytest.mark.parametrize("fallback", [False, True])
@@ -331,3 +332,21 @@ def test_question_endpoint_uses_gemini_with_retrieved_evidence(api, monkeypatch)
     assert response.status_code == 200, response.text
     assert response.json()["supported"] is True
     assert response.json()["evidence"][0]["id"] == "reference-1"
+
+
+@pytest.mark.parametrize("interests", [[""], ["   "], ["a" * 81], ["history"] * 9])
+def test_plan_rejects_invalid_interests(interests):
+    with pytest.raises(ValidationError):
+        PlanInput(destination="Agra", interests=interests)
+
+
+def test_plan_trims_interest_names():
+    assert PlanInput(destination="Agra", interests=[" heritage "]).interests == ["heritage"]
+
+
+def test_retrieval_prefers_matching_passages_and_keeps_four():
+    chunks = [Evidence(id=str(i), title="Tour notes", text=text, kind="monument_reference")
+              for i, text in enumerate(["red sandstone walls", "marble", "marble gardens", "river bank", "local food"])]
+    selected = retrieval.retrieve("marble gardens", chunks)
+    assert selected[0].text == "marble gardens"
+    assert len(selected) == 4

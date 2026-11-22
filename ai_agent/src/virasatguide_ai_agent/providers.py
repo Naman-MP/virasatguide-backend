@@ -1,6 +1,5 @@
 """Simple Gemini-first model calls, with Ollama as the optional fallback."""
 
-import json
 import logging
 import os
 import re
@@ -22,32 +21,14 @@ class GenerationError(Exception):
 
 def generation_config() -> dict:
     """Cache identity and storage metadata; never includes credentials."""
+    gemini_model = None
+    if os.getenv("GEMINI_API_KEY", "").strip():
+        gemini_model = os.getenv("GEMINI_MODEL", "").strip() or DEFAULT_GEMINI_MODEL
     return {
-        "gemini_model": (os.getenv("GEMINI_MODEL", "").strip() or DEFAULT_GEMINI_MODEL)
-        if os.getenv("GEMINI_API_KEY", "").strip() else None,
+        "gemini_model": gemini_model,
         "ollama_model": os.getenv("OLLAMA_MODEL", "").strip() or None,
         "ollama_think": os.getenv("OLLAMA_THINK", "").strip(),
     }
-
-
-async def post_json(url, body, headers, provider, timeout):
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=5)) as client:
-            result = await client.post(url, json=body, headers=headers)
-    except httpx.TimeoutException as exc:
-        raise GenerationError(f"{provider} timed out; please retry", 504) from exc
-    except httpx.HTTPError as exc:
-        raise GenerationError(f"{provider} is unavailable; check its server configuration") from exc
-    if result.status_code != 200:
-        # Do not return upstream response bodies: they can contain private data.
-        raise GenerationError(f"{provider} rejected the request (HTTP {result.status_code}); check its key, model and quota")
-    try:
-        data = result.json()
-        if not isinstance(data, dict):
-            raise ValueError("Expected an object")
-        return data
-    except ValueError as exc:
-        raise GenerationError(f"{provider} returned invalid output", 502) from exc
 
 
 async def gemini(instruction, context, schema, max_tokens, temperature):
@@ -62,11 +43,16 @@ async def gemini(instruction, context, schema, max_tokens, temperature):
         "contents": [{"role": "user", "parts": [{"text": context}]}],
         "generationConfig": config,
     }
-    data = await post_json(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
-        body, {"x-goog-api-key": os.environ["GEMINI_API_KEY"].strip()}, "Gemini", 45,
-    )
+    async with httpx.AsyncClient(timeout=httpx.Timeout(45, connect=5)) as client:
+        result = await client.post(
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+            json=body, headers={"x-goog-api-key": os.environ["GEMINI_API_KEY"].strip()},
+        )
+    result.raise_for_status()
     try:
+        data = result.json()
+        if not isinstance(data, dict):
+            raise ValueError("Expected an object")
         feedback = data.get("promptFeedback") or {}
         if not isinstance(feedback, dict):
             raise ValueError("Invalid feedback")
@@ -80,8 +66,14 @@ async def gemini(instruction, context, schema, max_tokens, temperature):
             raise GenerationError("Gemini declined this request", 502, allow_fallback=False)
         if reason != "STOP":
             raise ValueError("Incomplete response")
-        return "".join(part["text"] for part in candidate["content"]["parts"]
-                       if isinstance(part, dict) and not part.get("thought") and isinstance(part.get("text"), str))
+        text_parts = []
+        for part in candidate["content"]["parts"]:
+            if not isinstance(part, dict) or part.get("thought"):
+                continue
+            text = part.get("text")
+            if isinstance(text, str):
+                text_parts.append(text)
+        return "".join(text_parts)
     except (KeyError, IndexError, TypeError, ValueError) as exc:
         raise GenerationError("Gemini returned incomplete or invalid output", 502) from exc
 
@@ -89,9 +81,13 @@ async def gemini(instruction, context, schema, max_tokens, temperature):
 async def ollama(instruction, context, schema, max_tokens, temperature):
     base = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip().rstrip("/")
     parsed = urlsplit(base)
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
+    valid_address = parsed.scheme in {"http", "https"} and parsed.hostname
+    has_extra_parts = parsed.username or parsed.password or parsed.query or parsed.fragment
+    if not valid_address or has_extra_parts:
         raise GenerationError("Set OLLAMA_BASE_URL to your Ollama server URL")
-    if (os.getenv("VERCEL") == "1" or os.getenv("VERCEL_ENV") == "production") and parsed.hostname in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}:
+    on_vercel = os.getenv("VERCEL") == "1" or os.getenv("VERCEL_ENV") == "production"
+    local_address = parsed.hostname in {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+    if on_vercel and local_address:
         raise GenerationError("Vercel needs a hosted OLLAMA_BASE_URL; localhost cannot reach your Mac")
     body = {
         "model": generation_config()["ollama_model"], "stream": False,
@@ -105,36 +101,47 @@ async def ollama(instruction, context, schema, max_tokens, temperature):
     headers = {}
     if os.getenv("OLLAMA_API_KEY", "").strip():
         headers["Authorization"] = "Bearer " + os.environ["OLLAMA_API_KEY"].strip()
-    data = await post_json(base + "/api/chat", body, headers, "Ollama", 180)
+    async with httpx.AsyncClient(timeout=httpx.Timeout(180, connect=5)) as client:
+        result = await client.post(base + "/api/chat", json=body, headers=headers)
+    result.raise_for_status()
     try:
-        return data["message"]["content"]
-    except (KeyError, TypeError) as exc:
+        return result.json()["message"]["content"]
+    except (KeyError, TypeError, ValueError) as exc:
         raise GenerationError("Ollama returned invalid output", 502) from exc
 
 
 async def generate(instruction: str, context: str, *, schema: type[BaseModel] | None = None,
-                   max_tokens=5000, temperature=0.2) -> str:
-    """Validate each provider's result before accepting it. At most two calls."""
+                   max_tokens=5000, temperature=0.2) -> str | BaseModel:
+    """Return validated JSON data or story text, trying Gemini before Ollama."""
     config = generation_config()
-    providers = ([gemini] if config["gemini_model"] else []) + ([ollama] if config["ollama_model"] else [])
+    providers = []
+    if config["gemini_model"]:
+        providers.append(("Gemini", gemini))
+    if config["ollama_model"]:
+        providers.append(("Ollama", ollama))
     if not providers:
         raise GenerationError("Set GEMINI_API_KEY, or configure OLLAMA_MODEL and OLLAMA_BASE_URL")
     errors = []
-    for provider in providers:
+    for provider_name, call_provider in providers:
         try:
-            text = await provider(instruction, context, schema, max_tokens, temperature)
+            text = await call_provider(instruction, context, schema, max_tokens, temperature)
             if not isinstance(text, str) or not text.strip():
-                raise GenerationError(f"{provider.__name__.title()} returned empty output", 502)
+                raise GenerationError(f"{provider_name} returned empty output", 502)
             if schema:
                 try:
-                    schema.model_validate_json(text)
+                    return schema.model_validate_json(text)
                 except (ValidationError, ValueError) as exc:
-                    raise GenerationError(f"{provider.__name__.title()} returned invalid structured output", 502) from exc
+                    raise GenerationError(f"{provider_name} returned invalid structured output", 502) from exc
             return text.strip()
+        except httpx.TimeoutException:
+            error = GenerationError(f"{provider_name} timed out; please retry", 504)
+        except httpx.HTTPError:
+            error = GenerationError(f"{provider_name} request failed; check its key, model and server settings")
         except GenerationError as exc:
             if not exc.allow_fallback:
                 raise
-            logger.warning("AI provider %s failed (status %s)", provider.__name__, exc.status_code)
-            errors.append(str(exc))
-            last_error = exc
+            error = exc
+        logger.warning("AI provider %s failed (status %s)", provider_name, error.status_code)
+        errors.append(str(error))
+        last_error = error
     raise GenerationError("; ".join(errors), last_error.status_code) from last_error

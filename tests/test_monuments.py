@@ -37,8 +37,6 @@ class MemoryMonuments:
         self.last_filter = None
 
     async def count_documents(self, query):
-        if query.get("fail"):
-            raise PyMongoError("database unavailable")
         return len(self._matching(query))
 
     async def find_one(self, query, projection):
@@ -75,7 +73,7 @@ class MemoryDatabase:
 
 
 @pytest.fixture
-def api(monkeypatch):
+def api():
     documents = [
         {"id": 1, "name": "Taj Mahal", "city": "Agra", "location_tag": "Uttar Pradesh, India", "cover_image": "taj.jpg", "reference_text": "private detail"},
         {"id": 2, "name": "Red Fort", "city": "New Delhi", "location_tag": "Delhi, India", "cover_image": "red.jpg", "reference_text": "private detail"},

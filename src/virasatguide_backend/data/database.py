@@ -2,9 +2,7 @@
 
 import os
 from contextlib import asynccontextmanager
-from pathlib import Path
 
-from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from pymongo import AsyncMongoClient
 from pymongo.asynchronous.database import AsyncDatabase
@@ -15,7 +13,6 @@ from virasatguide_backend.data.security import get_secret_key
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    load_dotenv(Path(__file__).resolve().parents[3] / ".env")
     uri = os.getenv("MONGODB_URI")
     if not uri or "<db_password>" in uri:
         raise RuntimeError("Set MONGODB_URI in .env or the environment before starting.")
@@ -31,6 +28,7 @@ async def lifespan(app: FastAPI):
         await app.state.database.users.create_index("username", unique=True)
         await app.state.database.monuments.create_index("id", unique=True)
         await app.state.database.tour_stories.create_index("story_key", unique=True)
+        await app.state.database.travel_offers.create_index("expires_at", expireAfterSeconds=0)
         yield
     finally:
         await client.close()

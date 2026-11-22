@@ -11,3 +11,4 @@ httpx>=0.28,<1
 itsdangerous>=2.2,<3
 -e ./ai_agent
 reportlab>=4.4,<5
+pycountry>=24.6,<27

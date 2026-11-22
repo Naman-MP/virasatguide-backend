@@ -5,9 +5,11 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from pydantic import BaseModel, Field
-from pymongo.errors import DuplicateKeyError
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from virasatguide_backend.data.database import get_users_collection
+from virasatguide_backend.data.profiles import ProfileUpdate, PublicProfile, public_profile
 from virasatguide_backend.data.security import (
     ALGORITHM,
     AUTH_COOKIE,
@@ -78,7 +80,8 @@ async def get_current_user(
         # Cookies are attached automatically: require our trusted frontend for writes.
         if token and request.method not in {"GET", "HEAD", "OPTIONS"}:
             origin = request.headers.get("origin")
-            if not get_frontend_origin() or origin != get_frontend_origin():
+            frontend_origin = get_frontend_origin()
+            if not frontend_origin or origin != frontend_origin:
                 raise HTTPException(403, "Untrusted request origin")
     if not token:
         raise credentials_exception
@@ -117,10 +120,27 @@ async def logout(
     return {"message": "Successfully logged out of all devices."}
 
 
-@router.get("/me")
-async def read_users_me(current_user: dict = Depends(get_current_user)):
-    # Return only public fields.
-    profile = {"_id": str(current_user["_id"]), "username": current_user["username"]}
-    if current_user.get("google_sub"):
-        profile.update(name=current_user.get("name"), email=current_user.get("email"))
-    return profile
+@router.get("/me", response_model=PublicProfile)
+async def read_users_me(response: Response, current_user: dict = Depends(get_current_user)):
+    response.headers["Cache-Control"] = "private, no-store"
+    return public_profile(current_user)
+
+
+@router.put("/profile", response_model=PublicProfile)
+async def update_profile(
+    profile: ProfileUpdate, response: Response,
+    current_user: dict = Depends(get_current_user), users=Depends(get_users_collection),
+):
+    # Ownership comes from the verified login, never from submitted profile fields.
+    fields = profile.model_dump(mode="json")
+    fields["onboarding_completed"] = True
+    try:
+        updated = await users.find_one_and_update(
+            {"_id": current_user["_id"]}, {"$set": fields}, return_document=ReturnDocument.AFTER,
+        )
+    except PyMongoError as exc:
+        raise HTTPException(503, "Profile storage is unavailable") from exc
+    if updated is None:
+        raise HTTPException(404, "Account not found")
+    response.headers["Cache-Control"] = "private, no-store"
+    return public_profile(updated)

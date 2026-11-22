@@ -14,13 +14,12 @@ async def list_monuments(
     page: int, page_size: int,
 ) -> tuple[list[dict], int]:
     filters: dict = {}
-    if search:
-        term = re.escape(search.strip())
-        if term:
-            filters["$or"] = [
-                {field: {"$regex": term, "$options": "i"}}
-                for field in ("name", "city", "location_tag")
-            ]
+    term = re.escape((search or "").strip())
+    if term:
+        filters["$or"] = [
+            {field: {"$regex": term, "$options": "i"}}
+            for field in ("name", "city", "location_tag")
+        ]
     if city:
         filters["city"] = {"$regex": f"^{re.escape(city.strip())}$", "$options": "i"}
 

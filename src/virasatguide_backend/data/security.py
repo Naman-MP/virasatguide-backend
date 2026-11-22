@@ -2,6 +2,7 @@
 
 import os
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 import jwt
 from pwdlib import PasswordHash
@@ -37,9 +38,8 @@ def get_password_hash(password: str) -> str:
 
 
 def create_access_token(data: dict) -> str:
-    to_encode = data.copy()
-    to_encode["exp"] = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    return jwt.encode(to_encode, get_secret_key(), algorithm=ALGORITHM)
+    expires = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    return jwt.encode({**data, "exp": expires}, get_secret_key(), algorithm=ALGORITHM)
 
 
 AUTH_COOKIE = "virasat_access_token"
@@ -47,19 +47,18 @@ AUTH_COOKIE = "virasat_access_token"
 
 def get_frontend_url() -> str:
     """A fixed trusted destination, never a redirect supplied by the browser."""
-    from urllib.parse import urlsplit
     value = os.getenv("FRONTEND_URL", "")
-    if value:
-        parsed = urlsplit(value)
-        if (not parsed.netloc or parsed.username or parsed.password or parsed.fragment
-            or (parsed.scheme != "https" and not (
-                parsed.scheme == "http" and parsed.hostname in {"localhost", "127.0.0.1"}
-            ))):
-            raise RuntimeError("FRONTEND_URL must be HTTPS, or HTTP on localhost for development")
+    if not value:
+        return value
+    parsed = urlsplit(value)
+    local = parsed.hostname in {"localhost", "127.0.0.1"}
+    valid_scheme = parsed.scheme == "https" or (parsed.scheme == "http" and local)
+    has_extra_parts = parsed.username or parsed.password or parsed.fragment
+    if not parsed.netloc or has_extra_parts or not valid_scheme:
+        raise RuntimeError("FRONTEND_URL must be HTTPS, or HTTP on localhost for development")
     return value
 
 
 def get_frontend_origin() -> str:
-    from urllib.parse import urlsplit
     parsed = urlsplit(get_frontend_url())
     return f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else ""

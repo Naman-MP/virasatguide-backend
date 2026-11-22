@@ -1,12 +1,11 @@
 """Small lexical RAG over a snapshot of the selected monument's story and facts."""
 
-import math
 import re
-from collections import Counter
 
 from fastapi import HTTPException
 
-from .schemas import CHAT_HISTORY_LIMIT, AnswerDraft, Evidence, plain_text
+from virasatguide_ai_agent.graph import clean_story_text
+from .schemas import CHAT_HISTORY_LIMIT, AnswerDraft, Evidence
 from .llm import generate_json
 
 STOP_WORDS = set("the a an is was were are of to in and it that this what who when where why how about me tell did does do its he she they for with".split())
@@ -21,7 +20,7 @@ def story_evidence(monument: dict, result: dict) -> list[Evidence]:
         documents.append((f"web-{i}", source["title"], source["snippet"], "web_snippet", source["url"]))
     chunks = []
     for prefix, title, content, kind, url in documents:
-        words = plain_text(content).split()
+        words = clean_story_text(content).split()
         for start in range(0, len(words), 100):
             chunks.append(Evidence(id=f"{prefix}-{start // 100 + 1}", title=title,
                                    text=" ".join(words[start:start + 125]), kind=kind, url=url))
@@ -34,11 +33,9 @@ def tokens(text: str) -> set[str]:
 
 def retrieve(question: str, evidence: list[Evidence], previous_question: str = "") -> list[Evidence]:
     query = tokens(question + " " + previous_question)
-    docs = [tokens(item.text) for item in evidence]
-    frequency = Counter(token for doc in docs for token in doc)
-    scores = [sum(math.log(1 + len(docs) / frequency[t]) for t in query & doc) for doc in docs]
-    ranked = sorted(range(len(evidence)), key=lambda i: scores[i], reverse=True)
-    return [evidence[i] for i in ranked[:4]]
+    # More shared words means a passage is more relevant. Ties keep source order.
+    ranked = sorted(evidence, key=lambda item: len(query & tokens(item.text)), reverse=True)
+    return ranked[:4]
 
 
 async def answer_question(question: str, chunks: list[Evidence], history: list[dict]):
@@ -58,4 +55,9 @@ async def answer_question(question: str, chunks: list[Evidence], history: list[d
         raise HTTPException(502, "The answer contained invalid evidence references; please retry")
     if not draft.supported:
         return "I do not have enough information in this tour's sources to answer that question.", False, []
-    return plain_text(draft.answer), True, [by_id[key] for key in dict.fromkeys(draft.evidence_ids)]
+    cited_passages = []
+    for evidence_id in draft.evidence_ids:
+        passage = by_id[evidence_id]
+        if passage not in cited_passages:
+            cited_passages.append(passage)
+    return draft.answer, True, cited_passages

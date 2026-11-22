@@ -32,6 +32,13 @@ class Users:
             if document['_id'] == query['_id']:
                 document['token_version'] = document.get('token_version', 1) + 1
 
+    async def find_one_and_update(self, query, update, **kwargs):
+        for document in self.documents.values():
+            if document.get('_id') == query['_id']:
+                document.update(update['$set'])
+                return copy.deepcopy(document)
+        return None
+
 
 @pytest.fixture
 def client(monkeypatch):
@@ -54,7 +61,7 @@ def test_register_login_profile_logout(client):
     assert response.status_code == 200
     headers = {'Authorization': 'Bearer ' + response.json()['access_token']}
     profile = api.get('/auth/me', headers=headers)
-    assert profile.json() == {'_id': 'test-id', 'username': 'alice'}
+    assert profile.json() == {'_id': 'test-id', 'username': 'alice', 'full_name': None, 'date_of_birth': None, 'gender': 'prefer_not_to_say', 'onboarding_completed': False, 'name': None, 'email': None, 'google_sub': None}
     assert 'password' in users.documents['alice']
     assert api.post('/auth/logout', headers=headers).status_code == 200
     assert api.get('/auth/me', headers=headers).status_code == 401
@@ -100,7 +107,7 @@ def test_database_lifecycle(monkeypatch, failure):
     import asyncio
     monkeypatch.setenv('MONGODB_URI', 'mongodb://localhost')
     monkeypatch.setenv('JWT_SECRET_KEY', 'test-only-signing-secret-at-least-32-characters')
-    fake_db = SimpleNamespace(users=SimpleNamespace(create_index=AsyncMock()), monuments=SimpleNamespace(create_index=AsyncMock()), tour_stories=SimpleNamespace(create_index=AsyncMock()))
+    fake_db = SimpleNamespace(users=SimpleNamespace(create_index=AsyncMock()), monuments=SimpleNamespace(create_index=AsyncMock()), tour_stories=SimpleNamespace(create_index=AsyncMock()), travel_offers=SimpleNamespace(create_index=AsyncMock()))
     class Client:
         admin = SimpleNamespace(command=AsyncMock(side_effect=ConnectionFailure('offline') if failure else None))
         close = AsyncMock()
@@ -120,6 +127,7 @@ def test_database_lifecycle(monkeypatch, failure):
             fake_db.users.create_index.assert_awaited_once_with('username', unique=True)
             fake_db.monuments.create_index.assert_awaited_once_with('id', unique=True)
             fake_db.tour_stories.create_index.assert_awaited_once_with('story_key', unique=True)
+            fake_db.travel_offers.create_index.assert_awaited_once_with('expires_at', expireAfterSeconds=0)
         client.close.assert_awaited_once()
         assert app_stub.state.database is None
     asyncio.run(check())

@@ -1,3 +1,5 @@
+"""Command-line shortcut: start the local API on port 8000."""
+
 def main() -> None:
     import uvicorn
 

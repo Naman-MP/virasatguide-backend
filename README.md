@@ -1,5 +1,7 @@
 # Virasat Guide Backend
 
+Start with [the demo walkthrough](docs/demo-walkthrough.md) for a plain explanation. Each source folder has a short README describing its files. The [travel API guide](docs/travel-api.md) contains the frontend integration details.
+
 ## Run
 
 Requires Python 3.13+ and a working MongoDB Atlas connection.
@@ -34,6 +36,8 @@ API docs: http://127.0.0.1:8000/docs
 In a second terminal, open the frontend repo and run `npm run dev`. Open http://127.0.0.1:5173/src/landing-page/index.html. Use `127.0.0.1` for both servers. Restart the backend after editing `.env`.
 
 ## Google OAuth and JWT
+
+The frontend should use `GET /auth/google/continue` for its single Google button. It signs in or creates a verified Google account. The legacy login/signup behavior described below is preserved for compatibility. After login, read `/auth/me` and submit actual onboarding information with `PUT /auth/profile`.
 
 In Google Cloud Console, configure the consent screen, create an OAuth **Web application** client, and add this authorized redirect URI:
 
@@ -111,3 +115,7 @@ To run every feature against actual services, configure Atlas, local Ollama and 
 The backend source is deployed through GitHub/Vercel. Set `GEMINI_API_KEY` and `GEMINI_MODEL` in the backend Vercel project's Production environment, then redeploy. The primary Gemini path does not need Ollama hosting. For a working production fallback, also set `OLLAMA_BASE_URL` to a hosted HTTPS Ollama-compatible service, `OLLAMA_MODEL` to a model installed there and, if needed, `OLLAMA_API_KEY` for bearer authentication. Localhost on Vercel cannot access this Mac. Provider keys must never be frontend variables or committed files.
 
 The same shared client validates output for stories, questions and plans. Provider timeouts, HTTP failures and invalid output trigger the configured fallback; provider refusals are not bypassed. The complete configuration and frontend integration contract are in [docs/travel-api.md](docs/travel-api.md). A successful `/health` checks MongoDB, not model readiness. After adding the real Gemini key, run an authenticated generation to verify the key/model/quota before declaring production AI ready.
+
+## Current integration additions
+
+Use `/auth/google/continue` for the single Google button, `/auth/me` to read onboarding status and `PUT /auth/profile` to save actual traveler information. The travel API also exposes transport/hotel search contracts and capability discovery. No licensed inventory provider is configured; those searches return unavailable with empty results. Extended plans accept route/dates/preferences and separate selected provider quotes from estimates. See [the exact API guide](docs/travel-api.md) and [OpenAPI contract](docs/openapi.json).

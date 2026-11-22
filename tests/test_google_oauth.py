@@ -274,3 +274,27 @@ def test_production_callback_and_cross_site_cookie(google_flow, monkeypatch):
     assert api.post('/auth/logout', headers={'Origin': 'https://attacker.example'}).status_code == 403
     assert api.post('/auth/logout', headers={'Origin': frontend}).status_code == 200
     assert api.get('/auth/me').status_code == 401
+
+
+
+def test_unified_google_continue_creates_then_signs_in(google_flow):
+    api, users, google, key = google_flow
+    for attempt in range(2):
+        query = start(api, 'continue')
+        set_token(google, key, query, name='Actual Google Name')
+        response = api.get('/auth/google/callback', params={'state': query['state'][0], 'code': 'verified'})
+        assert response.status_code == 200
+        headers = {'Authorization': 'Bearer ' + response.json()['access_token']}
+        profile = api.get('/auth/me', headers=headers).json()
+        assert profile['full_name'] == 'Actual Google Name'
+        assert profile['onboarding_completed'] is False
+        assert profile['google_sub'] == '12345'
+    assert len(users.documents) == 1
+
+
+def test_unified_google_continue_does_not_create_unverified_account(google_flow):
+    api, users, google, key = google_flow
+    query = start(api, 'continue')
+    set_token(google, key, query, email_verified=False)
+    assert api.get('/auth/google/callback', params={'state': query['state'][0], 'code': 'bad'}).status_code == 401
+    assert not users.documents

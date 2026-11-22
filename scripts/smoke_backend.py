@@ -9,6 +9,7 @@ import json
 import os
 import secrets
 from io import BytesIO
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -83,6 +84,19 @@ def main():
             assert api.post("/auth/login", data={**credentials, "password": "wrong"}).status_code == 401
             assert api.post(f"/api/v1/monuments/{mid}/story").status_code == 401
             passed("real account registration, duplicate protection, login and authentication")
+            assert checked(api.get("/auth/me", headers=headers)).json()["onboarding_completed"] is False
+            profile = checked(api.put("/auth/profile", json={"full_name": "QA Traveler", "date_of_birth": "2000-01-01", "gender": "prefer_not_to_say"}, headers=headers)).json()
+            assert profile["onboarding_completed"] is True and profile["full_name"] == "QA Traveler"
+            assert checked(api.get("/auth/me", headers=headers)).json() == profile
+            passed("real profile onboarding and MongoDB persistence")
+            departure = (datetime.now(timezone.utc) + timedelta(days=30)).date()
+            returning = departure + timedelta(days=1)
+            journey = {"origin": {"label": "Bengaluru, India"}, "destination": {"label": monument["city"]}, "stops": [],
+                "departure_date": departure.isoformat(), "return_date": returning.isoformat(), "travelers": 2, "modes": ["flight", "train"], "currency": "INR"}
+            assert checked(api.post("/api/v1/travel/transport/search", json=journey, headers=headers)).json()["status"] == "unavailable"
+            hotel_request = {"destination": monument["city"], "check_in": departure.isoformat(), "check_out": returning.isoformat(), "travelers": 2, "rooms": 1, "currency": "INR"}
+            assert checked(api.post("/api/v1/travel/hotels/search", json=hotel_request, headers=headers)).json()["status"] == "unavailable"
+            passed("honest unavailable transport and hotel searches")
 
             print("Generating a real AI story...", flush=True)
             story = checked(api.post(f"/api/v1/monuments/{mid}/story", headers=headers)).json()
@@ -126,6 +140,22 @@ def main():
             (output / "trip.pdf").write_bytes(pdf.content)
             (output / "trip.json").write_text(json.dumps(trip, indent=2))
             passed("real itinerary, budget arithmetic, saved plan and PDF download")
+            print("Generating a dated itinerary with travel preferences...", flush=True)
+            extended = checked(api.post("/api/v1/travel/plans", json={"destination": monument["city"], "days": 1, "travelers": 2, "budget": 5000,
+                "origin": journey["origin"], "departure_date": departure.isoformat(), "return_date": returning.isoformat(), "travel_mode": "flight",
+                "hotel_preferences": {"rooms": 1, "star_ratings": [3, 4]}}, headers=headers), 201).json()
+            assert extended["cost_summary"]["confirmed_total"] == 0
+            assert extended["request"]["departure_date"] == departure.isoformat()
+            extended_pdf = checked(api.get("/api/v1/travel/plans/" + extended["plan_id"] + "/pdf", headers=headers))
+            text = " ".join(p.extract_text() for p in PdfReader(BytesIO(extended_pdf.content)).pages)
+            assert departure.isoformat() in text and "Bengaluru" in text
+            (output / "extended-trip.pdf").write_bytes(extended_pdf.content)
+            (output / "extended-trip.json").write_text(json.dumps(extended, indent=2))
+            passed("real dated itinerary with unavailable inventory and route/date PDF")
+            capabilities = checked(api.get("/api/v1/travel/capabilities")).json()
+            assert capabilities["transport_search"] is False and capabilities["hotel_search"] is False
+            assert capabilities["profile_onboarding"] is True and capabilities["extended_planning"] is True
+            passed("live local capability probes")
 
             other = {"username": "qa-" + uuid4().hex, "password": secrets.token_urlsafe(20)}
             checked(api.post("/auth/register", json=other), 201)

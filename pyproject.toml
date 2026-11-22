@@ -17,6 +17,7 @@ dependencies = [
     "itsdangerous>=2.2,<3",
     "virasatguide-ai-agent",
     "reportlab>=4.4,<5",
+    "pycountry>=24.6,<27",
 ]
 
 [project.scripts]

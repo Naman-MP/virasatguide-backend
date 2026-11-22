@@ -8,6 +8,7 @@ import pytest
 from fastapi import HTTPException
 
 from virasatguide_ai_agent import generate_story, providers
+import virasatguide_ai_agent.graph as story_graph
 from virasatguide_ai_agent.graph import AgentError
 from virasatguide_backend.data.stories import story_key_for
 from virasatguide_backend.travel.llm import generate_json
@@ -21,6 +22,11 @@ def gemini_response(text, **changes):
     candidate = {"finishReason": "STOP", "content": {"parts": [{"text": text}]}}
     candidate.update(changes)
     return httpx.Response(200, json={"candidates": [candidate]})
+
+
+@pytest.fixture(autouse=True)
+def no_live_search(monkeypatch):
+    monkeypatch.setattr(story_graph, "search_monument", lambda *_: [])
 
 
 @pytest.fixture
@@ -161,7 +167,7 @@ def test_story_graph_uses_gemini_and_cleans_text(monkeypatch, transport):
         assert context["reference_text"] == MONUMENT["reference_text"]
         return gemini_response(r"Known history.\nMore facts.")
     transport(handle)
-    story = asyncio.run(generate_story(MONUMENT, search=lambda *_: []))
+    story = asyncio.run(generate_story(MONUMENT))
     assert story.story == "Known history. More facts."
 
 
@@ -171,14 +177,14 @@ def test_story_graph_uses_ollama_after_gemini_failure(monkeypatch, transport):
         if request.url.host == "generativelanguage.googleapis.com": return httpx.Response(503)
         return httpx.Response(200, json={"message": {"content": "Fallback narration"}})
     transport(handle)
-    story = asyncio.run(generate_story(MONUMENT, search=lambda *_: []))
+    story = asyncio.run(generate_story(MONUMENT))
     assert story.story == "Fallback narration"
 
 
 def test_story_errors_are_reported_without_saving(monkeypatch, transport):
     transport(lambda _: httpx.Response(503))
     with pytest.raises(AgentError, match="Ollama"):
-        asyncio.run(generate_story(MONUMENT, search=lambda *_: []))
+        asyncio.run(generate_story(MONUMENT))
 
 
 def test_thought_parts_do_not_appear_in_story(monkeypatch, transport):

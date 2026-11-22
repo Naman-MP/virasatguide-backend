@@ -1,6 +1,7 @@
 """Agent and endpoint checks use fake search, Ollama, and database services."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -9,6 +10,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from virasatguide_ai_agent import MonumentContext, StoryResult, generate_story
+import virasatguide_ai_agent.graph as story_graph
 from virasatguide_ai_agent.graph import AgentError
 from virasatguide_ai_agent.models import Source
 from virasatguide_ai_agent.tools import search_monument
@@ -50,38 +52,40 @@ def test_agent_validates_monument_and_story():
         asyncio.run(generate_story({"id": 7}))
 
 
-def test_graph_searches_then_writes_using_all_monument_fields():
-    seen = []
+@pytest.fixture
+def story_tools(monkeypatch):
+    generate = AsyncMock(return_value="Known history.")
+    monkeypatch.setattr(story_graph, "generate", generate)
+    monkeypatch.setattr(story_graph, "search_monument", lambda *_: [])
+    return generate
+
+
+def test_graph_searches_then_writes_using_all_monument_fields(story_tools, monkeypatch):
     source = Source(title="India Gate history", url="https://example.org/history",
                     snippet="India Gate is in New Delhi.")
-    def search(name, city):
-        seen.append((name, city))
-        return [source]
-    model = SimpleNamespace(ainvoke=AsyncMock(return_value=SimpleNamespace(
-        content="A vivid story about India Gate."
-    )))
-    result = asyncio.run(generate_story(MONUMENT, model=model, search=search))
-    assert seen == [("India Gate", "New Delhi")]
+    search = lambda name, city: [source] if (name, city) == ("India Gate", "New Delhi") else []
+    monkeypatch.setattr(story_graph, "search_monument", search)
+    story_tools.return_value = "A vivid story about India Gate."
+    result = asyncio.run(generate_story(MONUMENT))
     assert result.monument_id == 7
     assert result.story == "A vivid story about India Gate."
     assert result.research_status == "web_results"
     assert result.sources == [source]
-    prompt = str(model.ainvoke.call_args.args[0])
-    for value in MONUMENT.values():
-        assert str(value) in prompt
+    context = json.loads(story_tools.call_args.args[1])
+    for field, value in MONUMENT.items():
+        assert context[field] == value
 
 
-def test_graph_uses_database_when_search_has_no_results():
-    model = SimpleNamespace(ainvoke=AsyncMock(return_value=SimpleNamespace(content="Known history.")))
-    result = asyncio.run(generate_story(MONUMENT, model=model, search=lambda *_: []))
+def test_graph_uses_database_when_search_has_no_results(story_tools):
+    result = asyncio.run(generate_story(MONUMENT))
     assert result.research_status == "database_only"
     assert result.sources == []
 
 
-def test_graph_rejects_empty_model_output():
-    model = SimpleNamespace(ainvoke=AsyncMock(return_value=SimpleNamespace(content="  ")))
+def test_graph_rejects_empty_model_output(story_tools):
+    story_tools.return_value = "  "
     with pytest.raises(AgentError, match="empty story"):
-        asyncio.run(generate_story(MONUMENT, model=model, search=lambda *_: []))
+        asyncio.run(generate_story(MONUMENT))
 
 
 def test_search_prefers_duckduckgo_and_falls_back_to_bing(monkeypatch):
@@ -107,12 +111,12 @@ def test_search_prefers_duckduckgo_and_falls_back_to_bing(monkeypatch):
 
 
 def test_story_endpoint_auth_success_and_missing_monument(monkeypatch):
-    import virasatguide_backend.routes.agent_stories as route
+    import virasatguide_backend.services.stories as service
     db = fake_database()
     generated = AsyncMock(return_value=StoryResult(
         monument_id=7, story="A short story.", sources=[], research_status="database_only"
     ))
-    monkeypatch.setattr(route, "generate_story", generated)
+    monkeypatch.setattr(service, "generate_story", generated)
     app.dependency_overrides[get_database] = lambda: db
     app.dependency_overrides[get_users_collection] = lambda: object()
     try:
@@ -141,7 +145,7 @@ def test_story_endpoint_auth_success_and_missing_monument(monkeypatch):
 
 
 def test_story_endpoint_accepts_signed_bearer_token(monkeypatch):
-    import virasatguide_backend.routes.agent_stories as route
+    import virasatguide_backend.services.stories as service
     from test_auth import Users
     from virasatguide_backend.data.security import create_access_token
 
@@ -149,7 +153,7 @@ def test_story_endpoint_accepts_signed_bearer_token(monkeypatch):
     users = Users()
     users.documents["alice"] = {"_id": "test-id", "username": "alice", "token_version": 1}
     db = fake_database()
-    monkeypatch.setattr(route, "generate_story", AsyncMock(return_value=StoryResult(
+    monkeypatch.setattr(service, "generate_story", AsyncMock(return_value=StoryResult(
         monument_id=7, story="A short story.", sources=[], research_status="database_only"
     )))
     app.dependency_overrides[get_database] = lambda: db
@@ -167,18 +171,15 @@ def test_story_endpoint_accepts_signed_bearer_token(monkeypatch):
         app.dependency_overrides.clear()
 
 
-def test_story_text_removes_literal_escapes_and_newlines():
-    model = SimpleNamespace(ainvoke=AsyncMock(return_value=SimpleNamespace(
-        content=r'"First line\nSecond\tline"'
-    )))
-    result = asyncio.run(generate_story(MONUMENT, model=model, search=lambda *_: []))
+
+def test_story_text_removes_literal_escapes_and_newlines(story_tools):
+    story_tools.return_value = r'"First line\nSecond\tline"'
+    result = asyncio.run(generate_story(MONUMENT))
     assert result.story == "First line Second line"
     assert "\n" not in result.story and "\\n" not in result.story
 
 
-def test_story_text_removes_real_line_breaks_and_controls():
-    model = SimpleNamespace(ainvoke=AsyncMock(return_value=SimpleNamespace(
-        content="First line\nSecond\tline\x1b"
-    )))
-    result = asyncio.run(generate_story(MONUMENT, model=model, search=lambda *_: []))
+def test_story_text_removes_real_line_breaks_and_controls(story_tools):
+    story_tools.return_value = "First line\nSecond\tline\x1b"
+    result = asyncio.run(generate_story(MONUMENT))
     assert result.story == "First line Second line"
