@@ -332,3 +332,23 @@ Optional destination autocomplete is **not implemented** in this release. The fr
 [docs/openapi.json](openapi.json) is the exported complete OpenAPI contract, including every Pydantic request/response field, nullability, defaults, field constraints expressible in OpenAPI, authentication requirements and preserved endpoint. Cross-field and dynamic date rules described above are also enforced at runtime. The deployed `/openapi.json` and `/docs` expose the running release. Use this artifact to generate frontend types rather than guessing from illustrative offer examples.
 
 New errors: profile/search input failures return 422; unknown/private/expired selected offers return 404; incompatible selected offers return 409. Provider search failures normally return 200 with an honest unavailable/partial search result. Database failures return 503. Existing model error statuses remain unchanged.
+
+
+## Verified production release — 2026-11-22
+
+Feature release `ab16df5d3d7b4f2b73753c10b1a3945f7bbf7d46` was pushed to GitHub and successfully deployed to the existing `virasatguide-backend-epsu` Vercel project. Live health, MongoDB connectivity, the new OpenAPI paths, Google Continue's HTTPS callback and secure OAuth session cookie, authenticated profile update/read/persistence, unavailable transport/hotel contracts, input validation, cookie Origin protection, PUT CORS and logout were verified. The exact random production QA account and its resources were removed after verification. A browser's final Google consent/account-selection step still belongs to the user; automated signed-token tests cover the verified callback/account-creation logic.
+
+Observed production capability response:
+
+```json
+{
+  "transport_search": false,
+  "hotel_search": false,
+  "extended_planning": false,
+  "profile_onboarding": true
+}
+```
+
+Profile onboarding is operational. Transport and hotel inventory remain disabled because there is no licensed provider account or registered, live-tested adapter. Production AI did not pass the bounded generation probe; configure a valid Gemini key or a reachable hosted Ollama service before enabling those generation controls. Local Ollama successfully generated and saved legacy and dated itineraries, questions and stories during real-service checks; real Fish Audio MP3 generation and both PDF formats were also checked. Saved plans/PDF rendering do not need a new model call.
+
+The release passed 196 automated tests and both package builds. Provider adapter tests use simulated fixtures and do not constitute real vendor integrations. Check the live capability endpoint again after any configuration change; the response above is a verification snapshot.
