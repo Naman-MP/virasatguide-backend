@@ -4,3 +4,5 @@
 - [Demo walkthrough](demo-walkthrough.md): a plain explanation of how the backend works and what to verify before presenting.
 
 - [Implemented features and verification](implemented-features.md): the full feature list, code simplification note, test results and remaining production blockers.
+
+- [Current frontend contract and migration](frontend-contract.md): Google-linked passwords, optional profiles, compatibility gaps, local verification and release blockers.

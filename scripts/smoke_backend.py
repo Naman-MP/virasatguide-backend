@@ -73,7 +73,7 @@ def main():
             assert api.get("/api/v1/monuments?page=0").status_code == 422
             passed("discovery, filters, pagination, numeric and readable detail routes")
 
-            username = "qa-" + uuid4().hex
+            username = "qa-" + uuid4().hex[:24]
             password = secrets.token_urlsafe(20)
             credentials = {"username": username, "password": password}
             checked(api.post("/auth/register", json=credentials), 201)
@@ -157,7 +157,7 @@ def main():
             assert capabilities["profile_onboarding"] is True and capabilities["extended_planning"] is True
             passed("live local capability probes")
 
-            other = {"username": "qa-" + uuid4().hex, "password": secrets.token_urlsafe(20)}
+            other = {"username": "qa-" + uuid4().hex[:24], "password": secrets.token_urlsafe(20)}
             checked(api.post("/auth/register", json=other), 201)
             other_token = checked(api.post("/auth/login", data=other)).json()["access_token"]
             other_headers = {"Authorization": "Bearer " + other_token}

@@ -3,10 +3,12 @@
 from pathlib import Path
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from .data.security import get_frontend_origin
+from .data.security import get_trusted_origins
 
 from .data.database import lifespan
 from .routes.health import router as health_router
@@ -27,12 +29,14 @@ for router in (auth_router, health_router, monuments_router, agent_stories_route
 
 app.add_middleware(GoogleOAuthSessionMiddleware)
 
-allowed_origins = ["https://virasat-frontend-nu.vercel.app"]
-frontend_origin = get_frontend_origin()
-if frontend_origin and frontend_origin not in allowed_origins:
-    allowed_origins.append(frontend_origin)
-
 app.add_middleware(
-    CORSMiddleware, allow_origins=allowed_origins, allow_credentials=True,
+    CORSMiddleware, allow_origins=get_trusted_origins(), allow_credentials=True,
     allow_methods=["GET", "POST", "PUT"], allow_headers=["Content-Type", "Authorization"],
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request: Request, exc: RequestValidationError):
+    # Validation errors must not echo submitted passwords or private request values.
+    errors = [{key: error[key] for key in ("loc", "msg", "type")} for error in exc.errors()]
+    return JSONResponse({"detail": errors}, status_code=422)

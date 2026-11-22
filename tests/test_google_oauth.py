@@ -119,7 +119,7 @@ def test_google_configuration_and_reserved_username(client, monkeypatch):
     api, _ = client
     monkeypatch.delenv('GOOGLE_CLIENT_ID', raising=False)
     assert api.get('/auth/google/login').status_code == 503
-    assert api.post('/auth/register', json={'username': 'google:12345', 'password': 'test-password'}).status_code == 400
+    assert api.post('/auth/register', json={'username': 'google:12345', 'password': 'test-password'}).status_code == 422
 
 
 def test_invalid_signature_is_rejected(google_flow):
@@ -296,5 +296,14 @@ def test_unified_google_continue_does_not_create_unverified_account(google_flow)
     api, users, google, key = google_flow
     query = start(api, 'continue')
     set_token(google, key, query, email_verified=False)
+    assert api.get('/auth/google/callback', params={'state': query['state'][0], 'code': 'bad'}).status_code == 401
+    assert not users.documents
+
+
+@pytest.mark.parametrize('overrides', [{'sub': ''}, {'sub': ' spaced '}, {'email': None}, {'email': 'not-an-email'}, {'email_verified': 'true'}])
+def test_google_continue_requires_valid_subject_and_verified_email(google_flow, overrides):
+    api, users, google, key = google_flow
+    query = start(api, 'continue')
+    set_token(google, key, query, **overrides)
     assert api.get('/auth/google/callback', params={'state': query['state'][0], 'code': 'bad'}).status_code == 401
     assert not users.documents

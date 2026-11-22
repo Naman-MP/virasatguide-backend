@@ -1,6 +1,7 @@
 """Google OpenID Connect sign-in and application token issuance."""
 
 import os
+import re
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 
 from authlib.integrations.starlette_client import OAuth, OAuthError
@@ -164,7 +165,10 @@ async def google_callback(
     request.session.clear()
     info = token.get("userinfo") or {}
     subject = info.get("sub")
-    if not isinstance(subject, str) or not subject or len(subject) > 255 or info.get("email_verified") is not True:
+    email = info.get("email")
+    if (not isinstance(subject, str) or not subject or len(subject) > 255 or subject.strip() != subject
+        or not isinstance(email, str) or len(email) > 320 or not re.fullmatch(r"[^\s@]+@[^\s@]+", email)
+        or info.get("email_verified") is not True):
         return oauth_failure(request, 401, "unverified", "A verified Google account is required")
     # Stable provider identity; never link a password account by email alone.
     username = "google:" + subject
@@ -175,7 +179,7 @@ async def google_callback(
         user = {
             "username": username, "google_sub": subject, "email": info.get("email"),
             "name": info.get("name"), "full_name": info.get("name"),
-            "onboarding_completed": False, "token_version": 1,
+            "onboarding_completed": False, "token_version": 1, "credentials_set": False,
         }
         try:
             await users.insert_one(user.copy())

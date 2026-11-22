@@ -7,3 +7,6 @@
 `planner.py` researches the route, checks the draft and calculates estimates. `retrieval.py` answers questions from saved tour evidence. `pdf.py` renders saved plans without new AI/provider calls. `llm.py` uses the shared Gemini/Ollama client.
 
 See the root `docs/travel-api.md` and `docs/openapi.json` for exact frontend integration details.
+
+
+`places.py` provides public worldwide city suggestions through Open-Meteo/GeoNames with bounded requests and validated labels/coordinates. It is not a travel inventory or route-distance provider. Manual entry remains available on failures.

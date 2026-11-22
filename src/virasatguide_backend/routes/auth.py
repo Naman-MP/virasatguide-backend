@@ -4,16 +4,16 @@ import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
-from pydantic import BaseModel, Field
 from pymongo import ReturnDocument
 from pymongo.errors import DuplicateKeyError, PyMongoError
 
+from virasatguide_backend.data.credentials import CredentialsInput, login_fields, login_name_query, public_login_fields
 from virasatguide_backend.data.database import get_users_collection
 from virasatguide_backend.data.profiles import ProfileUpdate, PublicProfile, public_profile
 from virasatguide_backend.data.security import (
     ALGORITHM,
     AUTH_COOKIE,
-    get_frontend_origin,
+    get_trusted_origins,
     create_access_token,
     get_password_hash,
     get_secret_key,
@@ -24,26 +24,22 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login", auto_error=False)
 
 
-class UserCreate(BaseModel):
-    username: str = Field(min_length=1, max_length=100, pattern=r"^\S+$")
-    password: str = Field(min_length=8, max_length=1024)
+# Keep the registration schema name available to existing imports.
+UserCreate = CredentialsInput
 
 
 @router.post("/register", status_code=201)
 async def register_user(user: UserCreate, users=Depends(get_users_collection)):
-    if user.username.startswith("google:"):
-        raise HTTPException(status_code=400, detail="This username prefix is reserved")
-    # Hash passwords without blocking other requests.
-    hashed_password = await run_in_threadpool(get_password_hash, user.password)
     try:
-        await users.insert_one({
-            "username": user.username,
-            "password": hashed_password,
-            "token_version": 1,
-        })
+        if await users.find_one(login_name_query(user.username)):
+            raise HTTPException(400, "Username already registered")
+        hashed = await run_in_threadpool(get_password_hash, user.password.get_secret_value())
+        await users.insert_one({"username": user.username, "password": hashed,
+                                "token_version": 1, **login_fields(user.username)})
     except DuplicateKeyError:
-        # MongoDB prevents duplicate usernames, including simultaneous signups.
-        raise HTTPException(status_code=400, detail="Username already registered") from None
+        raise HTTPException(400, "Username already registered") from None
+    except PyMongoError as exc:
+        raise HTTPException(503, "Account storage is unavailable") from exc
     return {"message": "User created successfully."}
 
 
@@ -52,9 +48,14 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     users=Depends(get_users_collection),
 ):
-    user = await users.find_one({"username": form_data.username})
+    try:
+        matches = await users.find(login_name_query(form_data.username)).limit(2).to_list()
+    except PyMongoError as exc:
+        raise HTTPException(503, "Account storage is unavailable") from exc
+    # Never select an arbitrary account if unmigrated legacy names are ambiguous.
+    user = matches[0] if len(matches) == 1 else None
     if not user or not await run_in_threadpool(
-        verify_password, form_data.password, user.get("password", "")
+        verify_password, form_data.password, user.get("password") or ""
     ):
         raise HTTPException(
             status_code=401, detail="Incorrect username or password",
@@ -80,8 +81,7 @@ async def get_current_user(
         # Cookies are attached automatically: require our trusted frontend for writes.
         if token and request.method not in {"GET", "HEAD", "OPTIONS"}:
             origin = request.headers.get("origin")
-            frontend_origin = get_frontend_origin()
-            if not frontend_origin or origin != frontend_origin:
+            if origin not in get_trusted_origins():
                 raise HTTPException(403, "Untrusted request origin")
     if not token:
         raise credentials_exception
@@ -98,7 +98,10 @@ async def get_current_user(
     except jwt.InvalidTokenError:
         raise credentials_exception from None
 
-    user = await users.find_one({"username": username})
+    try:
+        user = await users.find_one({"username": username})
+    except PyMongoError as exc:
+        raise HTTPException(503, "Account storage is unavailable") from exc
     # A changed version means the user logged out. Older users start at version 1.
     if user is None or user.get("token_version", 1) != token_version:
         raise credentials_exception
@@ -132,7 +135,8 @@ async def update_profile(
     current_user: dict = Depends(get_current_user), users=Depends(get_users_collection),
 ):
     # Ownership comes from the verified login, never from submitted profile fields.
-    fields = profile.model_dump(mode="json")
+    fields = profile.model_dump(mode="json", exclude_unset=True)
+    fields.setdefault("gender", "prefer_not_to_say")
     fields["onboarding_completed"] = True
     try:
         updated = await users.find_one_and_update(
@@ -142,5 +146,39 @@ async def update_profile(
         raise HTTPException(503, "Profile storage is unavailable") from exc
     if updated is None:
         raise HTTPException(404, "Account not found")
+    response.headers["Cache-Control"] = "private, no-store"
+    return public_profile(updated)
+
+
+@router.put("/credentials", response_model=PublicProfile, responses={
+    401: {"description": "Sign in required."},
+    403: {"description": "Only Google-linked accounts can set first-time credentials."},
+    409: {"description": "Credentials already exist or the login name is taken."},
+})
+async def set_credentials(
+    credentials: CredentialsInput, response: Response,
+    current_user: dict = Depends(get_current_user), users=Depends(get_users_collection),
+):
+    if not current_user.get("google_sub"):
+        raise HTTPException(403, "Credential setup requires a Google-linked account")
+    if current_user.get("password") or public_login_fields(current_user)["credentials_set"]:
+        raise HTTPException(409, "Sign-in credentials are already configured")
+    try:
+        if await users.find_one(login_name_query(credentials.username)):
+            raise HTTPException(409, "Username already registered")
+        hashed = await run_in_threadpool(get_password_hash, credentials.password.get_secret_value())
+        # Atomic first-time setup: two requests cannot replace each other's password.
+        updated = await users.find_one_and_update(
+            {"_id": current_user["_id"], "google_sub": current_user["google_sub"],
+             "password": {"$in": [None, ""]}},
+            {"$set": {**login_fields(credentials.username), "password": hashed}},
+            return_document=ReturnDocument.AFTER,
+        )
+    except DuplicateKeyError:
+        raise HTTPException(409, "Username already registered") from None
+    except PyMongoError as exc:
+        raise HTTPException(503, "Account storage is unavailable") from exc
+    if updated is None:
+        raise HTTPException(409, "Sign-in credentials are already configured; refresh your profile")
     response.headers["Cache-Control"] = "private, no-store"
     return public_profile(updated)

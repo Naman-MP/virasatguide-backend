@@ -1,6 +1,7 @@
 """Regression checks use memory only; no Atlas user records are changed."""
 
 import copy
+import re
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -15,26 +16,82 @@ from virasatguide_backend.data import database
 from virasatguide_backend.data.security import ALGORITHM, get_password_hash, verify_password
 
 
+def matches(document, query):
+    for key, expected in query.items():
+        value = document.get(key)
+        if key == "$or":
+            if not any(matches(document, clause) for clause in expected):
+                return False
+        elif isinstance(expected, dict):
+            if "$exists" in expected and (key in document) != expected["$exists"]:
+                return False
+            if "$type" in expected and not isinstance(value, str):
+                return False
+            if "$in" in expected and value not in expected["$in"]:
+                return False
+            if "$regex" in expected and (not isinstance(value, str) or not re.search(expected["$regex"], value, re.I)):
+                return False
+        elif value != expected:
+            return False
+    return True
+
+
+class Cursor:
+    def __init__(self, documents):
+        self.documents = documents
+    def limit(self, count):
+        self.documents = self.documents[:count]
+        return self
+    async def to_list(self):
+        return copy.deepcopy(self.documents)
+
+
 class Users:
     def __init__(self):
         self.documents = {}
+        self.indexes = []
+
+    def find(self, query, projection=None):
+        return Cursor([d for d in self.documents.values() if matches(d, query)])
 
     async def find_one(self, query):
-        return copy.deepcopy(self.documents.get(query['username']))
+        return next((copy.deepcopy(d) for d in self.documents.values() if matches(d, query)), None)
+
+    def check_unique(self, document):
+        for other in self.documents.values():
+            if other.get('_id') == document.get('_id'):
+                continue
+            if other['username'] == document['username'] or (
+                document.get('login_username_normalized') is not None and
+                other.get('login_username_normalized') == document['login_username_normalized']):
+                raise DuplicateKeyError('duplicate')
 
     async def insert_one(self, document):
-        if document['username'] in self.documents:
-            raise DuplicateKeyError('duplicate')
-        self.documents[document['username']] = dict(document, _id='test-id')
+        document = dict(document)
+        document.setdefault('_id', 'test-id' if not self.documents else 'test-id-' + str(len(self.documents)))
+        self.check_unique(document)
+        self.documents[document['username']] = document
+
+    async def create_index(self, field, **options):
+        self.indexes.append((field, options))
 
     async def update_one(self, query, update):
         for document in self.documents.values():
-            if document['_id'] == query['_id']:
-                document['token_version'] = document.get('token_version', 1) + 1
+            if matches(document, query):
+                if isinstance(update, list):
+                    document['token_version'] = document.get('token_version', 1) + 1
+                else:
+                    candidate = {**document, **update['$set']}
+                    self.check_unique(candidate)
+                    document.update(update['$set'])
+                return SimpleNamespace(modified_count=1)
+        return SimpleNamespace(modified_count=0)
 
     async def find_one_and_update(self, query, update, **kwargs):
         for document in self.documents.values():
-            if document.get('_id') == query['_id']:
+            if matches(document, query):
+                candidate = {**document, **update['$set']}
+                self.check_unique(candidate)
                 document.update(update['$set'])
                 return copy.deepcopy(document)
         return None
@@ -61,7 +118,7 @@ def test_register_login_profile_logout(client):
     assert response.status_code == 200
     headers = {'Authorization': 'Bearer ' + response.json()['access_token']}
     profile = api.get('/auth/me', headers=headers)
-    assert profile.json() == {'_id': 'test-id', 'username': 'alice', 'full_name': None, 'date_of_birth': None, 'gender': 'prefer_not_to_say', 'onboarding_completed': False, 'name': None, 'email': None, 'google_sub': None}
+    assert profile.json() == {'_id': 'test-id', 'username': 'alice', 'full_name': None, 'date_of_birth': None, 'gender': 'prefer_not_to_say', 'onboarding_completed': False, 'name': None, 'email': None, 'google_sub': None, 'login_username': 'alice', 'credentials_set': True}
     assert 'password' in users.documents['alice']
     assert api.post('/auth/logout', headers=headers).status_code == 200
     assert api.get('/auth/me', headers=headers).status_code == 401
@@ -107,7 +164,7 @@ def test_database_lifecycle(monkeypatch, failure):
     import asyncio
     monkeypatch.setenv('MONGODB_URI', 'mongodb://localhost')
     monkeypatch.setenv('JWT_SECRET_KEY', 'test-only-signing-secret-at-least-32-characters')
-    fake_db = SimpleNamespace(users=SimpleNamespace(create_index=AsyncMock()), monuments=SimpleNamespace(create_index=AsyncMock()), tour_stories=SimpleNamespace(create_index=AsyncMock()), travel_offers=SimpleNamespace(create_index=AsyncMock()))
+    fake_db = SimpleNamespace(users=Users(), monuments=SimpleNamespace(create_index=AsyncMock()), tour_stories=SimpleNamespace(create_index=AsyncMock()), travel_offers=SimpleNamespace(create_index=AsyncMock()))
     class Client:
         admin = SimpleNamespace(command=AsyncMock(side_effect=ConnectionFailure('offline') if failure else None))
         close = AsyncMock()
@@ -124,7 +181,7 @@ def test_database_lifecycle(monkeypatch, failure):
         else:
             async with database.lifespan(app_stub):
                 assert app_stub.state.database is fake_db
-            fake_db.users.create_index.assert_awaited_once_with('username', unique=True)
+            assert fake_db.users.indexes == [('username', {'unique': True}), ('login_username_normalized', {'unique': True, 'name': 'unique_login_username_normalized', 'partialFilterExpression': {'login_username_normalized': {'$type': 'string'}}})]
             fake_db.monuments.create_index.assert_awaited_once_with('id', unique=True)
             fake_db.tour_stories.create_index.assert_awaited_once_with('story_key', unique=True)
             fake_db.travel_offers.create_index.assert_awaited_once_with('expires_at', expireAfterSeconds=0)

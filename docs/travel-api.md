@@ -1,12 +1,14 @@
 # Travel API
 
-Travel endpoints run under `/api/v1/travel` and require the same login used for story generation, except public `GET /capabilities`. Use the bearer token returned by `POST /auth/login`, or the Google login cookie from the configured frontend. Local Swagger is at http://127.0.0.1:8000/docs.
+Travel endpoints run under `/api/v1/travel` and require the same login used for story generation, except public `GET /capabilities` and `GET /places/suggest`. Use the bearer token returned by `POST /auth/login`, or the Google login cookie from the configured frontend. Local Swagger is at http://127.0.0.1:8000/docs.
 
 ## Authentication quick index
 
 - `GET /auth/google/continue`: the new single Google sign-in/signup entry point.
 - `GET /auth/me`: public account fields and onboarding status.
-- `PUT /auth/profile`: authenticated profile onboarding.
+- `PUT /auth/profile`: authenticated profile onboarding; birth date is optional.
+- `PUT /auth/credentials`: first-time username/password setup on the signed-in Google account.
+- `GET /auth/me` also returns `login_username` and `credentials_set`; credential setup and personal onboarding are independent. See [the current frontend contract and migration guide](frontend-contract.md).
 - Existing password and Google login/signup endpoints remain available.
 
 ## Architecture
@@ -84,6 +86,7 @@ Deployment and configuration are separate: publishing this code does not create 
 | Method | Path | Result |
 | --- | --- | --- |
 | GET | `/capabilities` | Public operational readiness flags |
+| GET | `/places/suggest?q=jaip` | Public worldwide city suggestions from Open-Meteo/GeoNames |
 | POST | `/transport/search` | Authenticated transport search; unavailable until a licensed adapter is ready |
 | POST | `/hotels/search` | Authenticated hotel comparison; unavailable until a licensed adapter is ready |
 | POST | `/tour-sessions` | Start a private session for a monument, generating its story if needed |
@@ -194,14 +197,16 @@ After the callback returns to the configured frontend, call `GET /auth/me` with 
 {"full_name":"Your submitted name","date_of_birth":"2000-01-01","gender":"prefer_not_to_say"}
 ```
 
-These values illustrate the schema only. The backend does not fill in a sample person's identity. Profile fields are stored in MongoDB, not localStorage. `full_name` is trimmed and must have 1-120 characters. Birth dates require exact YYYY-MM-DD and a valid calendar date between 1900-01-01 and today in UTC. Gender accepts `male`, `female`, `non_binary`, `other`, and `prefer_not_to_say`; omitted or null gender means `prefer_not_to_say`. All three valid fields complete onboarding; the client cannot submit `onboarding_completed`, a username or another user's ID.
+These values illustrate the schema only. The backend does not fill in a sample person's identity. Profile fields are stored in MongoDB, not localStorage. `full_name` is trimmed and must have 1-120 characters. Birth dates are optional. An omitted birth date preserves an existing value; explicit null clears it. A supplied birth date requires exact YYYY-MM-DD and a valid calendar date between 1900-01-01 and today in UTC. Gender accepts `male`, `female`, `non_binary`, `other`, and `prefer_not_to_say`; omitted or null gender means `prefer_not_to_say`. A valid full name completes personal onboarding even without a birth date; the client cannot submit `onboarding_completed`, a username or another user's ID.
 
 Both profile endpoints return this public shape (nullable fields use JSON null):
 
 ```json
 {
   "_id":"account-id",
-  "username":"account-username",
+  "username":"stable-account-key",
+  "login_username":null,
+  "credentials_set":false,
   "full_name":null,
   "date_of_birth":null,
   "gender":"prefer_not_to_say",
@@ -212,7 +217,7 @@ Both profile endpoints return this public shape (nullable fields use JSON null):
 }
 ```
 
-`name`, email and stable Google subject are included when available. Legacy `_id`, username, name and email fields remain. Password hashes, provider credentials and authentication tokens are never included in profiles. Writes use the authenticated account ID and cookie writes require the configured frontend Origin. Production CORS now also permits PUT. Responses use private/no-store caching.
+`name`, email and stable Google subject are included when available. Legacy `_id`, username, name and email fields remain. Password hashes, provider credentials and authentication tokens are never included in profiles. Writes use the authenticated account ID and cookie writes require an explicitly trusted frontend Origin. Local development permits both localhost:5173 and 127.0.0.1:5173; production retains the configured frontend and the existing production Origin. Production CORS now also permits PUT. Responses use private/no-store caching.
 
 ## Transport search
 
@@ -231,7 +236,7 @@ Authenticated `POST /api/v1/travel/transport/search` accepts:
 }
 ```
 
-Location labels support worldwide manual entry and have 1-200 characters. Stops are ordered and limited to five. Adjacent duplicate locations are rejected; a route that returns to its origin through other stops is allowed. Dates must use YYYY-MM-DD; departure must be today (UTC) or later. Return is nullable for one-way travel and cannot precede departure. Travelers must be an integer 1-20. Modes must be a nonempty distinct subset of car/train/flight/bus. Car means supported car-rental inventory; this is not an invented fuel-cost or driving-time quote. Currency must be an uppercase ISO 4217 code.
+Location labels support worldwide manual entry and have 1-200 characters. Stops are ordered and limited to six. Adjacent duplicate locations are rejected; a route that returns to its origin through other stops is allowed. Dates must use YYYY-MM-DD; departure must be today (UTC) or later. Return is nullable for one-way travel and cannot precede departure. Travelers must be an integer 1-20. Modes must be a nonempty distinct subset of car/train/flight/bus. Car means supported car-rental inventory; this is not an invented fuel-cost or driving-time quote. Currency must be an uppercase ISO 4217 code.
 
 Exact top-level response fields: `search_id` (UUID), `status`, `searched_at` (timezone-aware ISO timestamp), `currency`, `results`, `unavailable_modes`, `warnings`.
 
@@ -271,7 +276,7 @@ Authenticated `POST /api/v1/travel/hotels/search` accepts:
 }
 ```
 
-Destination is 1-200 characters. Dates are exact YYYY-MM-DD, check-in is today (UTC) or later, and checkout is later by 1-30 nights. Travelers are 1-20; rooms are 1-10 and cannot exceed traveler count. Star filters are distinct integers 1-5; an empty list means no star filter. Unknown star ratings cannot satisfy an explicit star filter.
+Destination is 1-200 characters. Dates are exact YYYY-MM-DD, check-in is today (UTC) or later, and checkout is later by 1-30 nights. Travelers are 1-20; rooms are 1-20 and cannot exceed traveler count. Star filters are distinct integers 1-5; an empty list means no star filter. Unknown star ratings cannot satisfy an explicit star filter.
 
 Top-level response: `search_id`, `status`, `searched_at`, `results`, `warnings`. Hotel results contain `id`, `hotel_name`, `location`, nullable `star_rating`, `provider`, nullable `nightly_price`, nullable `total_price`, nullable `booking_url`, and `retrieved_at`. Price objects use the same amount/currency/type fields. Nightly prices cover all requested rooms; total prices cover the complete stay and all rooms/travelers. The backend does not multiply a nightly rate and label the result a live total. Missing totals remain null. Statuses have the same complete/partial/unavailable meaning. There is no booking, ticket sale or payment endpoint: Virasat only redirects to a verified public provider page.
 
@@ -292,7 +297,7 @@ Valid offers are saved in MongoDB `travel_offers` with their owner, original sea
 | Field | Type/default |
 | --- | --- |
 | origin | `{label: string}` or null |
-| stops | ordered list of places, default `[]`, maximum 5 |
+| stops | ordered list of places, default `[]`, maximum 6 |
 | departure_date | YYYY-MM-DD or null |
 | return_date | YYYY-MM-DD or null; requires departure, cannot precede it |
 | travel_mode | car/train/flight/bus or null |
@@ -325,7 +330,7 @@ Production target: [existing backend](https://virasatguide-backend-epsu.vercel.a
 
 Required owner configuration remains MongoDB URI/database, JWT signing secret, Google client ID/secret, production Google callback and frontend URL. Configure `GEMINI_API_KEY` / optional `GEMINI_MODEL` for cloud AI, or a reachable hosted `OLLAMA_BASE_URL`, installed `OLLAMA_MODEL`, and optional bearer `OLLAMA_API_KEY` for production fallback. A local Mac URL does not work from Vercel. Fish Audio requires `FISH_AUDIO_API_KEY`; a configured voice ID remains optional. No provider key belongs in frontend VITE variables. There is no configured live travel inventory provider until an account and tested adapter are supplied.
 
-Optional destination autocomplete is **not implemented** in this release. The frontend should retain manual worldwide location entry.
+Public `GET /api/v1/travel/places/suggest?q=jaip` is now implemented locally. It returns an array of at most six objects with `id`, `label`, `name`, `country`, `country_code`, `latitude`, `longitude`, `provider`, and `source_url`. Short one-character queries and no matches return `[]`. Query length is 1-120; blank/markup input returns 422. Provider timeout is 504, unavailable provider is 503, invalid output is 502. Manual entry remains available. See the [exact autocomplete contract and licensing note](frontend-contract.md#location-suggestions). This update has not been deployed.
 
 ## Exact schemas and integration reference
 
@@ -334,7 +339,9 @@ Optional destination autocomplete is **not implemented** in this release. The fr
 New errors: profile/search input failures return 422; unknown/private/expired selected offers return 404; incompatible selected offers return 409. Provider search failures normally return 200 with an honest unavailable/partial search result. Database failures return 503. Existing model error statuses remain unchanged.
 
 
-## Verified production release — 2026-11-22
+## Previous verified production release — 2026-11-22
+
+This historical verification describes `ab16df5`, before the local Google-linked credential update below. It is not a claim that the new endpoints are deployed.
 
 Feature release `ab16df5d3d7b4f2b73753c10b1a3945f7bbf7d46` was pushed to GitHub and successfully deployed to the existing `virasatguide-backend-epsu` Vercel project. Live health, MongoDB connectivity, the new OpenAPI paths, Google Continue's HTTPS callback and secure OAuth session cookie, authenticated profile update/read/persistence, unavailable transport/hotel contracts, input validation, cookie Origin protection, PUT CORS and logout were verified. The exact random production QA account and its resources were removed after verification. A browser's final Google consent/account-selection step still belongs to the user; automated signed-token tests cover the verified callback/account-creation logic.
 
@@ -352,3 +359,23 @@ Observed production capability response:
 Profile onboarding is operational. Transport and hotel inventory remain disabled because there is no licensed provider account or registered, live-tested adapter. Production AI did not pass the bounded generation probe; configure a valid Gemini key or a reachable hosted Ollama service before enabling those generation controls. Local Ollama successfully generated and saved legacy and dated itineraries, questions and stories during real-service checks; real Fish Audio MP3 generation and both PDF formats were also checked. Saved plans/PDF rendering do not need a new model call.
 
 The release passed 196 automated tests and both package builds. Provider adapter tests use simulated fixtures and do not constitute real vendor integrations. Check the live capability endpoint again after any configuration change; the response above is a verification snapshot.
+
+
+## Google-linked username/password setup (local update, not deployed)
+
+After Google Continue, read `/auth/me`. A Google-linked user with `credentials_set: false` can send:
+
+```http
+PUT /auth/credentials
+Content-Type: application/json
+```
+
+```json
+{"username":"Your.LoginName","password":"your-private-password"}
+```
+
+Use the existing Google HttpOnly cookie plus `credentials: "include"` and the frontend Origin, or a valid Bearer token. The response is the public profile shown above, with `login_username` set to the submitted display casing and `credentials_set: true`. `_id`, stable `username`, `google_sub`, personal onboarding and saved resource ownership remain unchanged. The route does not return a new token or a password/hash. The Google cookie remains valid. Future form-urlencoded `/auth/login` calls accept the chosen username case-insensitively and return a fresh `{access_token, token_type:"bearer"}` for the same stable account key. Google sign-in continues to use the verified Google subject.
+
+Username: 3-32 ASCII letters, numbers, `.`, `_`, `-`; `google:` is reserved. Password: 8-128 characters, preserved exactly and hashed with Argon2 in a worker thread. New local registrations share these rules. Existing local accounts retain their identities, hashes and password-login support, including legacy names outside the new signup format. Unknown/wrong credentials both return the same 401. Setup returns 401 without authentication, 403 for a non-Google account/untrusted cookie Origin, 409 for configured credentials or a taken name, 422 for malformed inputs, and 503 for unavailable storage. Duplicate local registration retains its existing 400 response. Validation errors omit submitted input values.
+
+Run the safe login-name audit/migration before starting this version against an existing database. Startup also reruns it idempotently and refuses ambiguous collisions. See [migration steps, test evidence and release status](frontend-contract.md). No existing account, saved story, session, plan, offer or index is deleted.

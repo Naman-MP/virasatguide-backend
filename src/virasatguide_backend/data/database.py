@@ -9,6 +9,7 @@ from pymongo.asynchronous.database import AsyncDatabase
 from pymongo.errors import PyMongoError
 
 from virasatguide_backend.data.security import get_secret_key
+from virasatguide_backend.data.credentials import migrate_login_names
 
 
 @asynccontextmanager
@@ -26,6 +27,7 @@ async def lifespan(app: FastAPI):
         app.state.database = client[os.getenv("MONGODB_DB", "virasatguide")]
         # Keep account and public monument IDs unique and fast to look up.
         await app.state.database.users.create_index("username", unique=True)
+        await migrate_login_names(app.state.database.users, apply=True)
         await app.state.database.monuments.create_index("id", unique=True)
         await app.state.database.tour_stories.create_index("story_key", unique=True)
         await app.state.database.travel_offers.create_index("expires_at", expireAfterSeconds=0)

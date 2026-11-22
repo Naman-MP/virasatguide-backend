@@ -47,7 +47,7 @@ def test_profile_gender_disclosure_is_optional(profile_api, gender):
 @pytest.mark.parametrize('change', [
     {'full_name':' '}, {'gender':'unknown'}, {'date_of_birth':'2001-02-29'},
     {'date_of_birth':'1800-01-01'}, {'date_of_birth':'2000-1-1'}, {'date_of_birth':12345},
-    {'date_of_birth':None}, {'date_of_birth':(datetime.now(timezone.utc)+timedelta(days=1)).date().isoformat()},
+    {'date_of_birth':(datetime.now(timezone.utc)+timedelta(days=1)).date().isoformat()},
 ])
 def test_profile_rejects_invalid_values(profile_api, change):
     api, _ = profile_api
@@ -64,3 +64,17 @@ def test_profile_cookie_writes_require_trusted_origin(profile_api):
     assert api.put('/auth/profile',json=body,headers={'Origin':'http://127.0.0.1:5173'}).status_code == 200
     preflight=api.options('/auth/profile',headers={'Origin':'https://virasat-frontend-nu.vercel.app','Access-Control-Request-Method':'PUT','Access-Control-Request-Headers':'Content-Type'})
     assert preflight.status_code == 200 and preflight.headers['access-control-allow-credentials']=='true'
+
+
+def test_birth_date_is_optional_can_be_kept_or_cleared(profile_api):
+    api, users = profile_api
+    response = api.put('/auth/profile', json={'full_name': 'Traveler'}, headers=login_headers())
+    assert response.status_code == 200
+    assert response.json()['date_of_birth'] is None and response.json()['onboarding_completed'] is True
+    assert response.json()['credentials_set'] is True
+    api.put('/auth/profile', json={'full_name': 'Traveler', 'date_of_birth': '2000-01-01'}, headers=login_headers())
+    response = api.put('/auth/profile', json={'full_name': 'Updated'}, headers=login_headers())
+    assert response.json()['date_of_birth'] == '2000-01-01'
+    response = api.put('/auth/profile', json={'full_name': 'Updated', 'date_of_birth': None}, headers=login_headers())
+    assert response.json()['date_of_birth'] is None
+    assert users.documents['alice']['onboarding_completed'] is True

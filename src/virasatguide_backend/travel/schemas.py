@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from virasatguide_ai_agent.graph import clean_story_text
+from virasatguide_ai_agent.models import public_source_url
 from .search_models import Place, Mode, HotelPreferences, PlanningOffers, CostSummary, TransportSearchInput, iso_date
 
 
@@ -32,6 +33,7 @@ class Evidence(Model):
     text: str
     kind: Literal["monument_reference", "generated_story", "web_snippet", "provider_offer"]
     url: str | None = None
+    _url = field_validator("url")(public_source_url)
 
 
 class QuestionInput(Model):
@@ -73,14 +75,14 @@ class PlanInput(Model):
     city: str | None = Field(default=None, min_length=1, max_length=120)
     area: str | None = Field(default=None, min_length=1, max_length=120)
     location: Location | None = None
-    days: int = Field(default=1, ge=1, le=7)
-    travelers: int = Field(default=1, ge=1, le=20)
-    budget: int | None = Field(default=None, ge=0, le=100000000)
+    days: int = Field(default=1, ge=1, le=7, strict=True)
+    travelers: int = Field(default=1, ge=1, le=20, strict=True)
+    budget: int | None = Field(default=None, ge=0, le=100000000, strict=True)
     currency: str = Field(default="INR", pattern=r"^[A-Z]{3}$")
     interests: list[Annotated[str, Field(min_length=1, max_length=80)]] = Field(default_factory=list, max_length=8)
 
     origin: Place | None = None
-    stops: list[Place] = Field(default_factory=list, max_length=5)
+    stops: list[Place] = Field(default_factory=list, max_length=6)
     departure_date: date | None = None
     return_date: date | None = None
     travel_mode: Mode | None = None
@@ -102,8 +104,7 @@ class PlanInput(Model):
             raise ValueError("Selected accommodation requires departure_date")
         if self.hotel_preferences and self.hotel_preferences.rooms > self.travelers:
             raise ValueError("Rooms cannot exceed traveler count")
-        if self.origin or self.stops or self.departure_date or self.travel_mode or self.hotel_preferences:
-            TransportSearchInput.valid_currency(self.currency)
+        TransportSearchInput.valid_currency(self.currency)
         route = ([self.origin.label] if self.origin else []) + [p.label for p in self.stops] + [self.destination]
         if any(a.casefold() == b.casefold() for a, b in zip(route, route[1:])):
             raise ValueError("Consecutive route locations must differ")

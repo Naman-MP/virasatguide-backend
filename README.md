@@ -45,7 +45,7 @@ In Google Cloud Console, configure the consent screen, create an OAuth **Web app
 
 Add your Google account as a test user if the app is in testing mode. Put the client ID and secret in the backend `.env`.
 
-Implemented `/auth/google/login`, `/auth/google/signup`, and `/auth/google/callback` with FastAPI and Authlib. The flow validates Google's ID token, state and nonce, and uses PKCE. Sign-in only accepts an existing MongoDB user matched by Google account ID. If no account exists, the callback shows a sign-up page with a link to `/auth/google/signup`; that explicit flow creates the account after Google verification. Successful authentication sets a 30-minute JWT in an HttpOnly cookie and redirects to the frontend dashboard. `/auth/google/status` checks configuration. Google tokens and passwords are not stored.
+Implemented `/auth/google/login`, `/auth/google/signup`, and `/auth/google/callback` with FastAPI and Authlib. The flow validates Google's ID token, state and nonce, and uses PKCE. Sign-in only accepts an existing MongoDB user matched by Google account ID. If no account exists, the callback shows a sign-up page with a link to `/auth/google/signup`; that explicit flow creates the account after Google verification. Successful authentication sets a 30-minute JWT in an HttpOnly cookie and redirects to the frontend dashboard. `/auth/google/status` checks configuration. Google provider tokens and plaintext passwords are not stored. Chosen local passwords are stored only as hashes.
 
 Password registration hashes passwords; `/auth/login` returns a bearer JWT. `/auth/me` accepts a valid bearer token or login cookie. JWTs require a valid signature, expiry, user and token version. `/auth/logout` revokes the user's existing tokens and clears the cookie. Cookie logout requires the configured frontend origin; CORS allows that origin. Accounts are not automatically linked by email.
 
@@ -119,3 +119,20 @@ The same shared client validates output for stories, questions and plans. Provid
 ## Current integration additions
 
 Use `/auth/google/continue` for the single Google button, `/auth/me` to read onboarding status and `PUT /auth/profile` to save actual traveler information. The travel API also exposes transport/hotel search contracts and capability discovery. No licensed inventory provider is configured; those searches return unavailable with empty results. Extended plans accept route/dates/preferences and separate selected provider quotes from estimates. See [the exact API guide](docs/travel-api.md) and [OpenAPI contract](docs/openapi.json).
+
+
+## Google-linked credentials and frontend integration (local update)
+
+This version supports `Rangesh64/virasat-frontend`, branch `feat/google-username-password`, including `PUT /auth/credentials`. Google-linked users choose a login name/password on their existing account; stable JWT subjects and private resource ownership do not change. `/auth/me` includes `login_username` and `credentials_set`. Personal profile onboarding is independent and date of birth is optional. Existing discovery, stories/audio, Q&A, plans, saved plan reads and PDF routes remain.
+
+Before starting against an existing database, stop its backend writers and audit the login migration:
+
+```sh
+uv sync
+uv run python scripts/migrate_login_names.py --database YOUR_DATABASE
+# Only after a collision-free audit and a normal database backup:
+uv run python scripts/migrate_login_names.py --database YOUR_DATABASE --apply
+uv run uvicorn virasatguide_backend.main:app --host 127.0.0.1 --port 8000
+```
+
+Use your actual database name, and keep `MONGODB_URI` private in the backend environment. Dry-run does not write; apply backfills only login metadata and adds a partial unique index. Startup repeats this idempotently and fails with an actionable error if legacy case-insensitive names collide. Never change the stable `username` account key to resolve a chosen login name. See [the exact contract, migration and verification guide](docs/frontend-contract.md) for collision handling, frontend checks, optional local Mongo tests and configuration. No deployment or production secret changes are part of this update.

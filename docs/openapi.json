@@ -16,7 +16,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/UserCreate"
+                "$ref": "#/components/schemas/CredentialsInput"
               }
             }
           },
@@ -160,6 +160,61 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ]
+      }
+    },
+    "/auth/credentials": {
+      "put": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Set Credentials",
+        "operationId": "set_credentials_auth_credentials_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CredentialsInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicProfile"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sign in required."
+          },
+          "403": {
+            "description": "Only Google-linked accounts can set first-time credentials."
+          },
+          "409": {
+            "description": "Credentials already exist or the login name is taken."
           },
           "422": {
             "description": "Validation Error",
@@ -1125,6 +1180,73 @@
         ]
       }
     },
+    "/api/v1/travel/places/suggest": {
+      "get": {
+        "tags": [
+          "Travel"
+        ],
+        "summary": "Places Suggest",
+        "description": "Public city suggestions; a failed provider never invents a location.",
+        "operationId": "places_suggest_api_v1_travel_places_suggest_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120,
+              "title": "Q"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PlaceSuggestion"
+                  },
+                  "title": "Response Places Suggest Api V1 Travel Places Suggest Get"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sign in required."
+          },
+          "404": {
+            "description": "Resource not found for this user."
+          },
+          "409": {
+            "description": "Another question is being saved or a request ID was reused."
+          },
+          "502": {
+            "description": "The model returned invalid output."
+          },
+          "503": {
+            "description": "Database, destination research or configured AI providers are unavailable."
+          },
+          "504": {
+            "description": "The final AI provider call timed out."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/auth/google/status": {
       "get": {
         "tags": [
@@ -1395,6 +1517,32 @@
         ],
         "title": "CostSummary"
       },
+      "CredentialsInput": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 3,
+            "pattern": "^[A-Za-z0-9._-]+$",
+            "title": "Username"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 8,
+            "format": "password",
+            "title": "Password",
+            "writeOnly": true
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "CredentialsInput"
+      },
       "Day": {
         "properties": {
           "day": {
@@ -1605,7 +1753,7 @@
           },
           "rooms": {
             "type": "integer",
-            "maximum": 10.0,
+            "maximum": 20.0,
             "minimum": 1.0,
             "title": "Rooms",
             "default": 1
@@ -1629,7 +1777,7 @@
           },
           "rooms": {
             "type": "integer",
-            "maximum": 10.0,
+            "maximum": 20.0,
             "minimum": 1.0,
             "title": "Rooms",
             "default": 1
@@ -1824,6 +1972,65 @@
         ],
         "title": "Place"
       },
+      "PlaceSuggestion": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "country": {
+            "type": "string",
+            "title": "Country"
+          },
+          "country_code": {
+            "type": "string",
+            "pattern": "^[A-Z]{2}$",
+            "title": "Country Code"
+          },
+          "latitude": {
+            "type": "number",
+            "maximum": 90.0,
+            "minimum": -90.0,
+            "title": "Latitude"
+          },
+          "longitude": {
+            "type": "number",
+            "maximum": 180.0,
+            "minimum": -180.0,
+            "title": "Longitude"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider",
+            "default": "Open-Meteo / GeoNames"
+          },
+          "source_url": {
+            "type": "string",
+            "title": "Source Url",
+            "default": "https://open-meteo.com/en/docs/geocoding-api"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "name",
+          "country",
+          "country_code",
+          "latitude",
+          "longitude"
+        ],
+        "title": "PlaceSuggestion"
+      },
       "PlanInput": {
         "properties": {
           "destination": {
@@ -1926,7 +2133,7 @@
               "$ref": "#/components/schemas/Place"
             },
             "type": "array",
-            "maxItems": 5,
+            "maxItems": 6,
             "title": "Stops"
           },
           "departure_date": {
@@ -2038,7 +2245,7 @@
             "anyOf": [
               {
                 "type": "integer",
-                "maximum": 10.0,
+                "maximum": 20.0,
                 "minimum": 1.0
               },
               {
@@ -2116,8 +2323,15 @@
             "title": "Full Name"
           },
           "date_of_birth": {
-            "type": "string",
-            "format": "date",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Date Of Birth"
           },
           "gender": {
@@ -2143,8 +2357,7 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "full_name",
-          "date_of_birth"
+          "full_name"
         ],
         "title": "ProfileUpdate"
       },
@@ -2157,6 +2370,22 @@
           "username": {
             "type": "string",
             "title": "Username"
+          },
+          "login_username": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Login Username"
+          },
+          "credentials_set": {
+            "type": "boolean",
+            "title": "Credentials Set",
+            "default": false
           },
           "full_name": {
             "anyOf": [
@@ -2574,7 +2803,7 @@
               "$ref": "#/components/schemas/Place"
             },
             "type": "array",
-            "maxItems": 5,
+            "maxItems": 6,
             "title": "Stops"
           },
           "departure_date": {
@@ -2811,29 +3040,6 @@
           "proximity_status"
         ],
         "title": "TripPlan"
-      },
-      "UserCreate": {
-        "properties": {
-          "username": {
-            "type": "string",
-            "maxLength": 100,
-            "minLength": 1,
-            "pattern": "^\\S+$",
-            "title": "Username"
-          },
-          "password": {
-            "type": "string",
-            "maxLength": 1024,
-            "minLength": 8,
-            "title": "Password"
-          }
-        },
-        "type": "object",
-        "required": [
-          "username",
-          "password"
-        ],
-        "title": "UserCreate"
       },
       "ValidationError": {
         "properties": {

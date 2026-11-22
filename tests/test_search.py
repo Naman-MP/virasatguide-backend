@@ -88,7 +88,7 @@ def test_missing_providers_are_honestly_unavailable(api):
 
 @pytest.mark.parametrize('change',[
     {'origin':{'label':' '}},{'modes':[]},{'modes':['taxi']},{'modes':['flight','flight']},
-    {'stops':[{'label':str(i)} for i in range(6)]},{'travelers':0},{'travelers':21},
+    {'stops':[{'label':str(i)} for i in range(7)]},{'travelers':0},{'travelers':21},
     {'departure_date':(START-timedelta(days=100)).isoformat()},{'return_date':(START-timedelta(days=1)).isoformat()},
     {'departure_date':'2026-2-3'},{'currency':'ZZZ'},{'destination':JOURNEY['origin']},
 ])

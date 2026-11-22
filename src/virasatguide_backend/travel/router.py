@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.concurrency import run_in_threadpool
 from pymongo.errors import PyMongoError
 
@@ -15,6 +15,7 @@ from virasatguide_backend.services.stories import get_or_create_story
 from .capabilities import Capabilities, get_capabilities
 from .search import search_transport, search_hotels
 from .search_models import future_dates, TransportSearchInput, TransportSearchResult, HotelSearchInput, HotelSearchResult
+from .places import PlaceSuggestion, suggest_places
 from .pdf import render_plan_pdf
 from .planner import create_plan
 from .retrieval import answer_question, story_evidence
@@ -157,3 +158,10 @@ async def transport_search(request: TransportSearchInput, response: Response, da
 async def hotels_search(request: HotelSearchInput, response: Response, database: Database, user: User):
     response.headers["Cache-Control"] = "private, no-store"
     return await search_hotels(request, database, user["username"])
+
+
+@router.get("/places/suggest", response_model=list[PlaceSuggestion])
+async def places_suggest(q: Annotated[str, Query(min_length=1, max_length=120)], response: Response):
+    """Public city suggestions; a failed provider never invents a location."""
+    response.headers["Cache-Control"] = "no-store"
+    return await suggest_places(q.strip())

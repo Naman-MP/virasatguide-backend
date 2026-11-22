@@ -55,7 +55,7 @@ class Place(SearchModel):
 
 class HotelPreferences(SearchModel):
     star_ratings: list[Annotated[int, Field(strict=True, ge=1, le=5)]] = Field(default_factory=list, max_length=5)
-    rooms: int = Field(default=1, ge=1, le=10, strict=True)
+    rooms: int = Field(default=1, ge=1, le=20, strict=True)
 
     @field_validator("star_ratings")
     @classmethod
@@ -68,7 +68,7 @@ class HotelPreferences(SearchModel):
 class TransportSearchInput(SearchModel):
     origin: Place
     destination: Place
-    stops: list[Place] = Field(default_factory=list, max_length=5)
+    stops: list[Place] = Field(default_factory=list, max_length=6)
     departure_date: date
     return_date: date | None = None
     travelers: int = Field(default=1, ge=1, le=20, strict=True)
@@ -181,7 +181,7 @@ class HotelSearchResult(SearchModel):
 class PlanningOffers(SearchModel):
     transport: TransportOption | None = None
     hotel: HotelOption | None = None
-    hotel_rooms: int | None = Field(default=None, ge=1, le=10)
+    hotel_rooms: int | None = Field(default=None, ge=1, le=20)
     hotel_check_in: date | None = None
     hotel_check_out: date | None = None
 

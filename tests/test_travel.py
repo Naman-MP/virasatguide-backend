@@ -350,3 +350,45 @@ def test_retrieval_prefers_matching_passages_and_keeps_four():
     selected = retrieval.retrieve("marble gardens", chunks)
     assert selected[0].text == "marble gardens"
     assert len(selected) == 4
+
+
+def test_get_saved_plan_and_pdf_never_regenerate(api, monkeypatch):
+    client, _ = api
+    plan = client.post('/api/v1/travel/plans', json={'destination': 'Agra'}).json()
+    def fail(*args, **kwargs):
+        raise AssertionError('Saved plan retrieval must not generate or search')
+    monkeypatch.setattr(planner, 'search_destination', fail)
+    monkeypatch.setattr(planner, 'generate_json', fail)
+    monkeypatch.setattr(router, 'create_plan', fail)
+    path = '/api/v1/travel/plans/' + plan['plan_id']
+    assert client.get(path).json() == plan
+    assert client.get(path + '/pdf').content.startswith(b'%PDF')
+
+
+@pytest.mark.parametrize('change', [{'days': True}, {'travelers': '2'}, {'budget': True}, {'budget': 2.5},
+                                   {'location': {'latitude': 'NaN', 'longitude': 0}}, {'currency': 'ZZZ'},
+                                   {'stops': [{'label': str(i)} for i in range(7)]}])
+def test_frontend_plan_limits_and_untrusted_numbers(api, change):
+    assert api[0].post('/api/v1/travel/plans', json={'destination': 'Agra', **change}).status_code == 422
+
+
+def test_frontend_supports_six_stops_and_twenty_rooms():
+    from virasatguide_backend.travel.search_models import TransportSearchInput, HotelSearchInput
+    from datetime import timedelta
+    start = (datetime.now(timezone.utc) + timedelta(days=20)).date().isoformat()
+    end = (datetime.now(timezone.utc) + timedelta(days=21)).date().isoformat()
+    request = PlanInput(destination='Agra', stops=[{'label': str(i)} for i in range(6)], travelers=20,
+                        hotel_preferences={'rooms': 20}, days=7, interests=['heritage']*8)
+    assert len(request.stops) == 6 and request.hotel_preferences.rooms == 20
+    assert len(TransportSearchInput(origin={'label':'Tokyo'}, destination={'label':'Agra'},
+        stops=[{'label':str(i)} for i in range(6)], departure_date=start).stops) == 6
+    assert HotelSearchInput(destination='Agra',check_in=start,check_out=end,travelers=20,rooms=20).rooms == 20
+
+
+@pytest.mark.parametrize('url', ['javascript:alert(1)', 'https://user:password@example.org', 'https://example.org/?api_key=secret', 'https://example.org/\nunsafe'])
+def test_evidence_urls_are_public_and_without_credentials(url):
+    from virasatguide_ai_agent.models import Source
+    with pytest.raises(ValidationError):
+        Evidence(id='web-1', title='Source', text='Facts', kind='web_snippet', url=url)
+    with pytest.raises(ValidationError):
+        Source(title='Source', snippet='Facts', url=url)

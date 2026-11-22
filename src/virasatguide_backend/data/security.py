@@ -3,6 +3,7 @@
 import os
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 import jwt
 from pwdlib import PasswordHash
@@ -39,7 +40,7 @@ def get_password_hash(password: str) -> str:
 
 def create_access_token(data: dict) -> str:
     expires = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    return jwt.encode({**data, "exp": expires}, get_secret_key(), algorithm=ALGORITHM)
+    return jwt.encode({**data, "exp": expires, "jti": str(uuid4())}, get_secret_key(), algorithm=ALGORITHM)
 
 
 AUTH_COOKIE = "virasat_access_token"
@@ -62,3 +63,14 @@ def get_frontend_url() -> str:
 def get_frontend_origin() -> str:
     parsed = urlsplit(get_frontend_url())
     return f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else ""
+
+
+def get_trusted_origins() -> list[str]:
+    """Explicit app origins; local development accepts both loopback host names."""
+    origins = {"https://virasat-frontend-nu.vercel.app"}
+    configured = get_frontend_origin()
+    if configured:
+        origins.add(configured)
+    if os.getenv("VERCEL_ENV") != "production":
+        origins.update({"http://localhost:5173", "http://127.0.0.1:5173"})
+    return sorted(origins)
