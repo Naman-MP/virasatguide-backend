@@ -1,6 +1,6 @@
 # Frontend contract, Google-linked credentials and migration
 
-Status: implemented and verified on branch `codex/google-linked-credentials`, based on backend commit `1f66ff7`. **Not deployed. No production secrets changed.** The separate frontend repository was read only.
+Status: merged into `main` and deployed to the existing production backend on 2026-11-22. Release commit `9ed1723` passed both Vercel build checks and live API smoke checks. No production secrets changed. The separate frontend repository was read only.
 
 ## Inspected frontend and initial gaps
 
@@ -105,7 +105,7 @@ Before rolling this update out to an existing database:
 
 Dry-run never writes. Apply first audits every existing login claim, then creates `unique_login_username_normalized`, a unique index with partial filter `{login_username_normalized: {$type: "string"}}`. This allows many Google users without chosen names. It backfills metadata without rewriting hashes/keys. If interrupted, rerun it; already-correct fields need no changes. Startup also runs this idempotent audit/backfill/index check; unresolved legacy collisions stay unindexed and require exact-case login. No existing indexes are dropped. The legacy lookup/reservation fallback prevents an unbackfilled local name from being claimed through new registration/setup. Do not resume older writers after migration.
 
-The migration was tested against isolated local MongoDB, including partial uniqueness, idempotence, safe collision skip and simultaneous credential claims. It has **not** been applied to Atlas or production by this task.
+The migration was tested against isolated local MongoDB, including partial uniqueness, idempotence, safe collision skip and simultaneous credential claims. The deployed backend includes the startup migration. The pre-deploy read-only audit found one collision group; those legacy records are skipped and retain exact-case login. A separate post-deploy record-count audit from this computer timed out during DNS resolution, although the live backend health check reported a connected database.
 
 ## Existing frontend travel and monument contracts
 
@@ -178,7 +178,7 @@ The optional checks require an explicit 127.0.0.1 Mongo URI. They create uniquel
 
 ## Release and configuration status
 
-This update is published on the feature branch only. No Vercel deployment, production secret edits, Google Console changes or production database migration were performed. The frontend repository was not edited. A real browser Google-consent check and production rollout remain separate steps after review.
+Release `9ed1723` is on `main`; both Vercel projects reported successful builds. The production backend returned healthy MongoDB status, an OpenAPI schema matching the tested code, 20 monument records, six Jaipur suggestions, Google configuration ready, and 401 for unauthenticated credential setup. Production secret settings and Google Console settings were not changed, and the frontend repository was not edited. A real browser Google-consent and credential-setup walkthrough remains to be checked by a user.
 
 Keep existing private backend configuration: MongoDB URI/database, JWT signing key, Google client credentials, exact backend callback, frontend return URL, AI settings and Fish Audio key. Local callback is `/auth/google/callback` on the local backend; production callback must remain `https://virasatguide-backend-epsu.vercel.app/auth/google/callback` and be registered identically with Google. Configure `FRONTEND_URL` for the intended dashboard; production CORS retains `https://virasat-frontend-nu.vercel.app`.
 

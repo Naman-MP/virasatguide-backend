@@ -361,7 +361,7 @@ Profile onboarding is operational. Transport and hotel inventory remain disabled
 The release passed 196 automated tests and both package builds. Provider adapter tests use simulated fixtures and do not constitute real vendor integrations. Check the live capability endpoint again after any configuration change; the response above is a verification snapshot.
 
 
-## Google-linked username/password setup (local update, not deployed)
+## Google-linked username/password setup (deployed 2026-11-22)
 
 After Google Continue, read `/auth/me`. A Google-linked user with `credentials_set: false` can send:
 

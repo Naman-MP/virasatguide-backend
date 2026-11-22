@@ -121,7 +121,7 @@ The same shared client validates output for stories, questions and plans. Provid
 Use `/auth/google/continue` for the single Google button, `/auth/me` to read onboarding status and `PUT /auth/profile` to save actual traveler information. The travel API also exposes transport/hotel search contracts and capability discovery. No licensed inventory provider is configured; those searches return unavailable with empty results. Extended plans accept route/dates/preferences and separate selected provider quotes from estimates. See [the exact API guide](docs/travel-api.md) and [OpenAPI contract](docs/openapi.json).
 
 
-## Google-linked credentials and frontend integration (local update)
+## Google-linked credentials and frontend integration
 
 This version supports `Rangesh64/virasat-frontend`, branch `feat/google-username-password`, including `PUT /auth/credentials`. Google-linked users choose a login name/password on their existing account; stable JWT subjects and private resource ownership do not change. `/auth/me` includes `login_username` and `credentials_set`. Personal profile onboarding is independent and date of birth is optional. Existing discovery, stories/audio, Q&A, plans, saved plan reads and PDF routes remain.
 
@@ -135,4 +135,4 @@ uv run python scripts/migrate_login_names.py --database YOUR_DATABASE --apply
 uv run uvicorn virasatguide_backend.main:app --host 127.0.0.1 --port 8000
 ```
 
-Use your actual database name, and keep `MONGODB_URI` private in the backend environment. Dry-run does not write; apply backfills only login metadata and adds a partial unique index. Startup repeats this idempotently; colliding legacy names remain unchanged and require exact-case login. Never change the stable `username` account key to resolve a chosen login name. See [the exact contract, migration and verification guide](docs/frontend-contract.md) for collision handling, frontend checks, optional local Mongo tests and configuration. No deployment or production secret changes are part of this update.
+Use your actual database name, and keep `MONGODB_URI` private in the backend environment. Dry-run does not write; apply backfills only login metadata and adds a partial unique index. Startup repeats this idempotently; colliding legacy names remain unchanged and require exact-case login. Never change the stable `username` account key to resolve a chosen login name. See [the exact contract, migration and verification guide](docs/frontend-contract.md) for collision handling, frontend checks, optional local Mongo tests and configuration. Deployed to the existing production backend on 2026-11-22. No production secrets were changed.
