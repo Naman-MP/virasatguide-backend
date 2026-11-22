@@ -29,8 +29,6 @@ async def main():
         async with AsyncMongoClient(uri, serverSelectionTimeoutMS=5000, timeoutMS=10000) as client:
             result = await migrate_login_names(client[args.database].users, apply=args.apply)
         print(json.dumps(result))
-    except RuntimeError as exc:
-        raise SystemExit(str(exc)) from None
     except PyMongoError:
         raise SystemExit("Migration could not complete. Check database access and index conflicts privately, then rerun. No accounts were deleted.") from None
 

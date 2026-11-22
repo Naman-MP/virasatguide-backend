@@ -44,24 +44,25 @@ async def migrate_login_names(users, *, apply: bool = False) -> dict:
     """Audit before writes; preserve account keys, hashes and all existing indexes."""
     documents = await users.find({}, {"username": 1, "google_sub": 1, "password": 1,
         "login_username": 1, "login_username_normalized": 1, "credentials_set": 1}).to_list()
-    claimed, updates = {}, []
+    claims, updates = {}, []
     for user in documents:
         fields = public_login_fields(user)
         name = fields["login_username"]
-        normalized = name.casefold() if name else user.get("login_username_normalized")
-        if normalized:
-            if normalized in claimed and claimed[normalized] != user["_id"]:
-                raise RuntimeError("Login-name collisions found. Resolve case-insensitive duplicates privately before migrating; no records were changed.")
-            claimed[normalized] = user["_id"]
-        if fields["credentials_set"]:
-            values = login_fields(name)
-            if any(user.get(key) != value for key, value in values.items()):
-                updates.append((user["_id"], user["username"], values))
+        if name:
+            claims.setdefault(name.casefold(), []).append(user)
+    collisions = {name for name, owners in claims.items() if len(owners) > 1}
+    for name, owners in claims.items():
+        if name in collisions:
+            continue  # Keep these legacy accounts and their exact-case logins usable.
+        user = owners[0]
+        values = login_fields(public_login_fields(user)["login_username"])
+        if any(user.get(key) != value for key, value in values.items()):
+            updates.append((user["_id"], user["username"], values))
     if apply:
-        # Partial uniqueness allows many Google accounts with no login name yet.
+        # Partial uniqueness allows Google accounts and unresolved legacy names.
         await users.create_index("login_username_normalized", unique=True,
             name="unique_login_username_normalized",
             partialFilterExpression={"login_username_normalized": {"$type": "string"}})
         for account_id, account_key, fields in updates:
             await users.update_one({"_id": account_id, "username": account_key}, {"$set": fields})
-    return {"accounts_checked": len(documents), "accounts_to_backfill": len(updates), "applied": apply}
+    return {"accounts_checked": len(documents), "accounts_to_backfill": len(updates), "collision_groups": len(collisions), "applied": apply}

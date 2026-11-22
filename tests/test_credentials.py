@@ -167,7 +167,7 @@ def test_migration_is_preflighted_idempotent_and_keeps_identity():
     users.documents['Old.Name'] = {'_id': 'stable-id', 'username': 'Old.Name', 'password': password_hash}
     add_google(users)
     result = asyncio.run(migrate_login_names(users))
-    assert result == {'accounts_checked': 2, 'accounts_to_backfill': 1, 'applied': False}
+    assert result == {'accounts_checked': 2, 'accounts_to_backfill': 1, 'collision_groups': 0, 'applied': False}
     assert 'login_username' not in users.documents['Old.Name'] and not users.indexes
     assert asyncio.run(migrate_login_names(users, apply=True))['accounts_to_backfill'] == 1
     assert asyncio.run(migrate_login_names(users, apply=True))['accounts_to_backfill'] == 0
@@ -179,21 +179,24 @@ def test_migration_is_preflighted_idempotent_and_keeps_identity():
     assert users.indexes[0][1]['partialFilterExpression'] == {'login_username_normalized': {'$type': 'string'}}
 
 
-def test_migration_collisions_fail_before_any_change():
+def test_migration_skips_colliding_legacy_accounts():
     users = Users()
     for name in ['Old.Name', 'OLD.NAME']:
         users.documents[name] = {'_id': name, 'username': name, 'password': 'unchanged-hash'}
-    with pytest.raises(RuntimeError, match='collisions'):
-        asyncio.run(migrate_login_names(users, apply=True))
-    assert not users.indexes
-    assert all('login_username' not in u for u in users.documents.values())
+    result = asyncio.run(migrate_login_names(users, apply=True))
+    assert result['collision_groups'] == 1 and result['accounts_to_backfill'] == 0
+    assert all('login_username_normalized' not in u for u in users.documents.values())
+    assert users.indexes[0][0] == 'login_username_normalized'
 
 
-def test_ambiguous_legacy_login_fails_closed(client):
+def test_ambiguous_legacy_login_requires_exact_case(client):
     api, users = client
     for name in ['Legacy', 'LEGACY']:
         users.documents[name] = {'_id': name, 'username': name, 'password': get_password_hash(PASSWORD)}
     assert api.post('/auth/login', data={'username': 'legacy', 'password': PASSWORD}).status_code == 401
+    for name in ['Legacy', 'LEGACY']:
+        token = api.post('/auth/login', data={'username': name, 'password': PASSWORD}).json()['access_token']
+        assert api.get('/auth/me', headers={'Authorization': 'Bearer '+token}).json()['username'] == name
 
 
 def test_no_email_linking_and_no_google_password_before_setup(google_flow):

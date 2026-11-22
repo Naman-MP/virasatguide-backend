@@ -130,9 +130,9 @@ Before starting against an existing database, stop its backend writers and audit
 ```sh
 uv sync
 uv run python scripts/migrate_login_names.py --database YOUR_DATABASE
-# Only after a collision-free audit and a normal database backup:
+# After reviewing the audit and taking a normal database backup:
 uv run python scripts/migrate_login_names.py --database YOUR_DATABASE --apply
 uv run uvicorn virasatguide_backend.main:app --host 127.0.0.1 --port 8000
 ```
 
-Use your actual database name, and keep `MONGODB_URI` private in the backend environment. Dry-run does not write; apply backfills only login metadata and adds a partial unique index. Startup repeats this idempotently and fails with an actionable error if legacy case-insensitive names collide. Never change the stable `username` account key to resolve a chosen login name. See [the exact contract, migration and verification guide](docs/frontend-contract.md) for collision handling, frontend checks, optional local Mongo tests and configuration. No deployment or production secret changes are part of this update.
+Use your actual database name, and keep `MONGODB_URI` private in the backend environment. Dry-run does not write; apply backfills only login metadata and adds a partial unique index. Startup repeats this idempotently; colliding legacy names remain unchanged and require exact-case login. Never change the stable `username` account key to resolve a chosen login name. See [the exact contract, migration and verification guide](docs/frontend-contract.md) for collision handling, frontend checks, optional local Mongo tests and configuration. No deployment or production secret changes are part of this update.

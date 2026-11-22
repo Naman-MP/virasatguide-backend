@@ -67,13 +67,14 @@ def test_real_mongo_migration_and_concurrent_credentials():
                 )
                 assert sorted(r.status_code for r in responses) in ([200,400], [201,409])
                 assert await users.count_documents({'login_username_normalized':'race.local'}) == 1
-                # A legacy case collision is detected before any fields or indexes change.
+                # Colliding legacy users stay distinct and can use exact-case logins.
                 collision = db.collision_test
                 await collision.insert_many([{'username':n,'password':old_hash} for n in ['Conflict','CONFLICT']])
-                with pytest.raises(RuntimeError, match='collisions'):
-                    await migrate_login_names(collision, apply=True)
-                assert await collision.count_documents({'login_username': {'$exists': True}}) == 0
-                assert set(await collision.index_information()) == {'_id_'}
+                result = await migrate_login_names(collision, apply=True)
+                assert result['collision_groups'] == 1 and result['accounts_to_backfill'] == 0
+                assert await collision.count_documents({'login_username_normalized': {'$exists': True}}) == 0
+                assert 'unique_login_username_normalized' in await collision.index_information()
+
         finally:
             app.dependency_overrides.clear()
             assert name.startswith('virasatguide_credentials_test_')

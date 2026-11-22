@@ -52,8 +52,10 @@ async def login(
         matches = await users.find(login_name_query(form_data.username)).limit(2).to_list()
     except PyMongoError as exc:
         raise HTTPException(503, "Account storage is unavailable") from exc
-    # Never select an arbitrary account if unmigrated legacy names are ambiguous.
-    user = matches[0] if len(matches) == 1 else None
+    # An old pair differing only by case keeps its original exact-case login.
+    # Do not choose either account for a new case-insensitive spelling.
+    exact = [item for item in matches if item.get("username") == form_data.username]
+    user = matches[0] if len(matches) == 1 else exact[0] if len(exact) == 1 else None
     if not user or not await run_in_threadpool(
         verify_password, form_data.password, user.get("password") or ""
     ):

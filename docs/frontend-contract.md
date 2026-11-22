@@ -65,7 +65,7 @@ All existing routes remain: Google status/continue/login/signup/callback, passwo
 
 Values here illustrate field roles, not an existing user. Before Google credential setup, `login_username` is null and `credentials_set` is false. Legacy local password accounts derive these public values from their existing username even before migration. No hash, token, key or other stored private field is projected into this response.
 
-`POST /auth/login` still accepts `application/x-www-form-urlencoded` username/password and returns exactly `{ "access_token": "...", "token_type": "bearer" }`. A new JWT is signed on each successful login, with a unique `jti`, the same stable internal `sub`, expiry and token version. Old valid JWTs remain compatible. Unknown usernames and wrong passwords both return `401 {"detail":"Incorrect username or password"}`. Case-ambiguous unmigrated legacy names fail closed rather than selecting an arbitrary user.
+`POST /auth/login` still accepts `application/x-www-form-urlencoded` username/password and returns exactly `{ "access_token": "...", "token_type": "bearer" }`. A new JWT is signed on each successful login, with a unique `jti`, the same stable internal `sub`, expiry and token version. Old valid JWTs remain compatible. Unknown usernames and wrong passwords both return `401 {"detail":"Incorrect username or password"}`. For legacy names differing only by case, the exact original spelling continues to work; an ambiguous alternate spelling fails closed.
 
 Google identities are matched by the verified stable subject, never linked by matching email. Password and Google sign-in therefore resolve to the same record only after that signed-in Google user explicitly adds credentials. Google still works afterwards. Logout continues to revoke both cookie and Bearer sessions through the token version.
 
@@ -94,8 +94,8 @@ Before rolling this update out to an existing database:
    uv run python scripts/migrate_login_names.py --database YOUR_DATABASE
    ```
 
-3. If the audit reports collisions, resolve them privately before applying. **Do not rename the stable `username`, merge accounts, delete users or rewrite saved-resource owners.** Assign an agreed distinct `login_username` to a conflicting local account, with matching lower/casefolded `login_username_normalized`; notify the account owner of their chosen login name. Never change the password/hash to resolve a name collision. Rerun the audit. The script deliberately prints counts/errors rather than account names, hashes or connection details.
-4. Apply the collision-free migration:
+3. If the audit reports collisions, record the count. The migration skips only those legacy login names; both accounts remain intact and can sign in with their original exact casing. An ambiguous alternate casing is rejected. Resolve these accounts with their owners later if case-insensitive login is required for them. Never rename the stable `username`, merge accounts, delete users or rewrite saved-resource owners. The script prints counts rather than account names, hashes or connection details.
+4. Apply the migration for all noncolliding accounts:
 
    ```sh
    uv run python scripts/migrate_login_names.py --database YOUR_DATABASE --apply
@@ -103,9 +103,9 @@ Before rolling this update out to an existing database:
 
 5. Restart this version and verify Google and password login resolve the same profile and saved data.
 
-Dry-run never writes. Apply first audits every existing login claim, then creates `unique_login_username_normalized`, a unique index with partial filter `{login_username_normalized: {$type: "string"}}`. This allows many Google users without chosen names. It backfills metadata without rewriting hashes/keys. If interrupted, rerun it; already-correct fields need no changes. Startup also runs this same idempotent audit/backfill/index check and refuses unresolved collisions rather than allowing ambiguous login. No existing indexes are dropped. The legacy lookup/reservation fallback prevents an unbackfilled local name from being claimed through new registration/setup. Do not resume older writers after migration.
+Dry-run never writes. Apply first audits every existing login claim, then creates `unique_login_username_normalized`, a unique index with partial filter `{login_username_normalized: {$type: "string"}}`. This allows many Google users without chosen names. It backfills metadata without rewriting hashes/keys. If interrupted, rerun it; already-correct fields need no changes. Startup also runs this idempotent audit/backfill/index check; unresolved legacy collisions stay unindexed and require exact-case login. No existing indexes are dropped. The legacy lookup/reservation fallback prevents an unbackfilled local name from being claimed through new registration/setup. Do not resume older writers after migration.
 
-The migration was tested against isolated local MongoDB, including partial uniqueness, idempotence, no-write collision failure and simultaneous credential claims. It has **not** been applied to Atlas or production by this task.
+The migration was tested against isolated local MongoDB, including partial uniqueness, idempotence, safe collision skip and simultaneous credential claims. It has **not** been applied to Atlas or production by this task.
 
 ## Existing frontend travel and monument contracts
 
