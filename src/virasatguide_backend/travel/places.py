@@ -11,6 +11,7 @@ ATTRIBUTION = "Open-Meteo / GeoNames"
 
 
 class PlaceSuggestion(BaseModel):
+    """Public location label, coordinates, and source attribution."""
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     id: str
     label: str
@@ -24,6 +25,7 @@ class PlaceSuggestion(BaseModel):
 
 
 def display_text(value) -> str:
+    """Validate plain display text before accepting a geocoder label or query."""
     if not isinstance(value, str) or not value.strip() or len(value) > 200:
         raise ValueError("Invalid place label")
     if re.search(r"[<>\x00-\x1f\x7f]", value):
@@ -32,6 +34,7 @@ def display_text(value) -> str:
 
 
 async def suggest_places(query: str) -> list[PlaceSuggestion]:
+    """Query Open-Meteo and keep up to six usable, distinct locations."""
     try:
         query = display_text(query)
     except ValueError as exc:

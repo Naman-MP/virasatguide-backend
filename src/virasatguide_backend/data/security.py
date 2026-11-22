@@ -20,6 +20,7 @@ pwd_context = PasswordHash((Argon2Hasher(), BcryptHasher()))
 
 def get_secret_key() -> str:
     # Read the private key after .env has been loaded.
+    """Load the JWT signing key after environment initialization and check its length."""
     secret = os.getenv("JWT_SECRET_KEY", "")
     if len(secret) < 32:
         raise RuntimeError("Set JWT_SECRET_KEY to a random secret of at least 32 characters.")
@@ -28,6 +29,7 @@ def get_secret_key() -> str:
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     # A damaged password hash should reject login, not crash the app.
+    """Check a password against a supported hash and reject damaged hashes."""
     try:
         return pwd_context.verify(plain_password, hashed_password)
     except (UnknownHashError, ValueError):
@@ -35,10 +37,12 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 
 def get_password_hash(password: str) -> str:
+    """Hash a plaintext password with the configured Argon2 implementation."""
     return pwd_context.hash(password)
 
 
 def create_access_token(data: dict) -> str:
+    """Sign a fresh application token with an expiry and unique token ID."""
     expires = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     return jwt.encode({**data, "exp": expires, "jti": str(uuid4())}, get_secret_key(), algorithm=ALGORITHM)
 
@@ -61,6 +65,7 @@ def get_frontend_url() -> str:
 
 
 def get_frontend_origin() -> str:
+    """Extract the origin from the configured frontend return URL."""
     parsed = urlsplit(get_frontend_url())
     return f"{parsed.scheme}://{parsed.netloc}" if parsed.netloc else ""
 

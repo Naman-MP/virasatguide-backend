@@ -26,23 +26,37 @@ STAY={'destination':'Agra','check_in':START.isoformat(),'check_out':END.isoforma
 
 
 class Offers:
-    def __init__(self):self.docs={}
-    async def insert_one(self,doc):self.docs[doc['_id']]=copy.deepcopy(doc)
+    """Hold user-owned offer snapshots and check expiry during lookup."""
+    def __init__(self):
+        """Initialize the fixture state for the operations used in these tests."""
+        self.docs={}
+    async def insert_one(self,doc):
+        """Persist a test document in the fixture store."""
+        self.docs[doc['_id']]=copy.deepcopy(doc)
     async def find_one(self,query):
+        """Return the matching fixture document when it exists."""
         doc=self.docs.get(query['_id'])
         if not doc or doc['owner']!=query['owner'] or doc['kind']!=query['kind'] or doc['expires_at']<=query['expires_at']['$gt']:return None
         return copy.deepcopy(doc)
 
 
 class FixtureTransport:
+    """Return predictable licensed-adapter-shaped transport responses in tests."""
     name='Fixture Transport'
     modes={'flight'}
     max_stops=0
     booking_hosts={'inventory.example'}
-    def __init__(self):self.calls=[]
-    async def is_ready(self):return True
-    def supports(self,request):return True
+    def __init__(self):
+        """Initialize the fixture state for the operations used in these tests."""
+        self.calls=[]
+    async def is_ready(self):
+        """Report the readiness value expected by the adapter scenario."""
+        return True
+    def supports(self,request):
+        """Report whether the simulated adapter covers this request."""
+        return True
     async def search(self,request):
+        """Return or modify a simulated inventory result for the current scenario."""
         self.calls.append(request)
         return [TransportOption(mode='flight',provider=self.name,service_name='Test journey',
             departure_at=str(START)+'T08:00:00Z',arrival_at=str(START)+'T10:00:00Z',duration_minutes=120,
@@ -50,11 +64,17 @@ class FixtureTransport:
 
 
 class FixtureHotels:
+    """Return predictable licensed-adapter-shaped hotel responses in tests."""
     name='Fixture Hotels'
     booking_hosts={'inventory.example'}
-    async def is_ready(self):return True
-    def supports(self,request):return True
+    async def is_ready(self):
+        """Report the readiness value expected by the adapter scenario."""
+        return True
+    def supports(self,request):
+        """Report whether the simulated adapter covers this request."""
+        return True
     async def search(self,request):
+        """Return or modify a simulated inventory result for the current scenario."""
         return [HotelOption(hotel_name='Fixture Heritage Hotel',location='Agra',star_rating=4,provider=self.name,
             nightly_price={'amount':1000.05,'currency':'INR','type':'live'},
             total_price={'amount':5000.25,'currency':'INR','type':'live'},
@@ -63,6 +83,7 @@ class FixtureHotels:
 
 @pytest.fixture
 def api(monkeypatch):
+    """Provide the test API and fixture state."""
     db=SimpleNamespace(travel_offers=Offers(),monuments=Monuments(),trip_plans=Collection(),command=AsyncMock(return_value={'ok':1}))
     app.dependency_overrides[get_database]=lambda:db
     app.dependency_overrides[get_users_collection]=lambda:object()
@@ -76,6 +97,7 @@ def api(monkeypatch):
 
 
 def test_missing_providers_are_honestly_unavailable(api):
+    """Verify missing providers are honestly unavailable."""
     client,db=api
     for path,body in [('transport',JOURNEY),('hotels',STAY)]:
         response=client.post('/api/v1/travel/'+path+'/search',json=body)
@@ -93,21 +115,25 @@ def test_missing_providers_are_honestly_unavailable(api):
     {'departure_date':'2026-2-3'},{'currency':'ZZZ'},{'destination':JOURNEY['origin']},
 ])
 def test_journey_validation(api,change):
+    """Verify journey validation."""
     assert api[0].post('/api/v1/travel/transport/search',json={**JOURNEY,**change}).status_code==422
 
 
 @pytest.mark.parametrize('change',[{'check_out':START.isoformat()},{'rooms':3},{'star_ratings':[0]},{'star_ratings':[4,4]},{'currency':'ZZZ'},{'destination':' '}])
 def test_hotel_validation(api,change):
+    """Verify hotel validation."""
     assert api[0].post('/api/v1/travel/hotels/search',json={**STAY,**change}).status_code==422
 
 
 def test_search_requires_authentication(api):
+    """Verify search requires authentication."""
     app.dependency_overrides.pop(get_current_user)
     assert api[0].post('/api/v1/travel/transport/search',json=JOURNEY).status_code==401
     assert api[0].post('/api/v1/travel/hotels/search',json=STAY).status_code==401
 
 
 def test_one_way_international_and_unsupported_stops(api,monkeypatch):
+    """Verify one way international and unsupported stops."""
     provider=FixtureTransport()
     monkeypatch.setattr(search_providers,'transport_providers',[provider])
     body={**JOURNEY,'destination':{'label':'Tokyo, Japan'},'return_date':None,'stops':[{'label':'Singapore'}]}
@@ -120,9 +146,11 @@ def test_one_way_international_and_unsupported_stops(api,monkeypatch):
 
 
 def test_partial_results_and_confirmed_price_order(api,monkeypatch):
+    """Verify partial results and confirmed price order."""
     provider=FixtureTransport()
     original=provider.search
     async def options(request):
+        """Supply provider transport options with different price classifications."""
         offer=(await original(request))[0]
         return [offer.model_copy(update={'price':None,'booking_url':None}),offer.model_copy(update={'price':offer.price.model_copy(update={'amount':100,'type':'estimate'})}),offer]
     provider.search=options
@@ -134,8 +162,10 @@ def test_partial_results_and_confirmed_price_order(api,monkeypatch):
 
 @pytest.mark.parametrize('bad',['https://attacker.example/offer','javascript:alert(1)','https://user:secret@inventory.example/','https://inventory.example/?api_key=secret'])
 def test_provider_bad_urls_never_reach_frontend(api,monkeypatch,bad):
+    """Verify provider bad urls never reach frontend."""
     provider=FixtureTransport();original=provider.search
     async def search(request):
+        """Return or modify a simulated inventory result for the current scenario."""
         offer=(await original(request))[0].model_dump();offer['booking_url']=bad;return [offer]
     provider.search=search
     monkeypatch.setattr(search_providers,'transport_providers',[provider])
@@ -144,6 +174,7 @@ def test_provider_bad_urls_never_reach_frontend(api,monkeypatch,bad):
 
 
 def test_provider_failure_does_not_leak_details(api,monkeypatch):
+    """Verify provider failure does not leak details."""
     provider=FixtureTransport()
     provider.search=AsyncMock(side_effect=RuntimeError('private-provider-token'))
     monkeypatch.setattr(search_providers,'transport_providers',[provider])
@@ -152,6 +183,7 @@ def test_provider_failure_does_not_leak_details(api,monkeypatch):
 
 
 def test_selected_offers_are_private_and_expire(api,monkeypatch):
+    """Verify selected offers are private and expire."""
     client,db=api
     monkeypatch.setattr(search_providers,'transport_providers',[FixtureTransport()])
     offer=client.post('/api/v1/travel/transport/search',json=JOURNEY).json()['results'][0]
@@ -167,6 +199,7 @@ def test_selected_offers_are_private_and_expire(api,monkeypatch):
 
 
 def test_confirmed_costs_saved_plan_and_extended_pdf(api,monkeypatch):
+    """Verify confirmed costs saved plan and extended PDF."""
     client,db=api
     monkeypatch.setattr(search_providers,'transport_providers',[FixtureTransport()])
     monkeypatch.setattr(search_providers,'hotel_providers',[FixtureHotels()])
@@ -194,6 +227,7 @@ def test_confirmed_costs_saved_plan_and_extended_pdf(api,monkeypatch):
 
 
 def test_extended_plan_without_inventory_uses_estimates_and_keeps_route(api,monkeypatch):
+    """Verify extended plan without inventory uses estimates and keeps route."""
     monkeypatch.setattr(planner,'generate_json',AsyncMock(return_value=draft()))
     response=api[0].post('/api/v1/travel/plans',json={'destination':'Agra','origin':JOURNEY['origin'],
         'departure_date':START.isoformat(),'travel_mode':'bus','hotel_preferences':{'rooms':1},'stops':[{'label':'Hyderabad'}]})
@@ -207,6 +241,7 @@ def test_extended_plan_without_inventory_uses_estimates_and_keeps_route(api,monk
 
 
 def test_capabilities_require_actual_readiness_checks(api,monkeypatch):
+    """Verify capabilities require actual readiness checks."""
     provider=FixtureTransport()
     provider.is_ready=AsyncMock(return_value=False)
     monkeypatch.setattr(search_providers,'transport_providers',[provider])
@@ -217,6 +252,7 @@ def test_capabilities_require_actual_readiness_checks(api,monkeypatch):
 
 
 def test_ai_capability_does_not_trust_key_presence(monkeypatch):
+    """Verify ai capability does not trust key presence."""
     from virasatguide_ai_agent.providers import GenerationError
     monkeypatch.setenv('GEMINI_API_KEY','not-a-real-key')
     monkeypatch.setattr(capabilities,'_ai_probe',{'config':None,'checked':0.0,'ready':False})
@@ -230,8 +266,10 @@ def test_ai_capability_does_not_trust_key_presence(monkeypatch):
 
 
 def test_missing_hotel_total_stays_unknown(api,monkeypatch):
+    """Verify missing hotel total stays unknown."""
     hotel_provider=FixtureHotels();original=hotel_provider.search
     async def no_price(request):
+        """Simulate a provider offer without a hotel total."""
         offer=(await original(request))[0]
         return [offer.model_copy(update={'nightly_price':None,'total_price':None,'booking_url':None})]
     hotel_provider.search=no_price
@@ -247,8 +285,10 @@ def test_missing_hotel_total_stays_unknown(api,monkeypatch):
 
 
 def test_provider_estimate_is_not_counted_as_confirmed(api,monkeypatch):
+    """Verify provider estimate is not counted as confirmed."""
     provider=FixtureTransport();original=provider.search
     async def estimated(request):
+        """Simulate a provider that returned an estimate rather than a confirmed quote."""
         offer=(await original(request))[0]
         return [offer.model_copy(update={'price':offer.price.model_copy(update={'type':'estimate'})})]
     provider.search=estimated
@@ -263,8 +303,10 @@ def test_provider_estimate_is_not_counted_as_confirmed(api,monkeypatch):
 
 
 def test_model_instance_cannot_bypass_url_validation(api,monkeypatch):
+    """Verify model instance cannot bypass URL validation."""
     provider=FixtureTransport();original=provider.search
     async def unsafe(request):
+        """Simulate an offer containing a booking URL that should be rejected."""
         offer=(await original(request))[0]
         return [offer.model_copy(update={'booking_url':'https://inventory.example/?api_key=private'})]
     provider.search=unsafe
@@ -275,6 +317,7 @@ def test_model_instance_cannot_bypass_url_validation(api,monkeypatch):
 
 
 def test_multi_mode_search_passes_only_supported_modes_to_adapter(api,monkeypatch):
+    """Verify multi mode search passes only supported modes to adapter."""
     provider=FixtureTransport()
     provider.supports=lambda request:request.modes==['flight']
     monkeypatch.setattr(search_providers,'transport_providers',[provider])
@@ -284,6 +327,7 @@ def test_multi_mode_search_passes_only_supported_modes_to_adapter(api,monkeypatc
 
 
 def test_saved_dated_plans_remain_readable_after_dates_pass(api,monkeypatch):
+    """Verify saved dated plans remain readable after dates pass."""
     client,db=api
     monkeypatch.setattr(planner,'generate_json',AsyncMock(return_value=draft()))
     response=client.post('/api/v1/travel/plans',json={'destination':'Agra','departure_date':START.isoformat()})
@@ -295,6 +339,7 @@ def test_saved_dated_plans_remain_readable_after_dates_pass(api,monkeypatch):
 
 
 def test_same_day_trip_does_not_request_a_zero_night_hotel(api,monkeypatch):
+    """Verify same day trip does not request a zero night hotel."""
     monkeypatch.setattr(planner,'generate_json',AsyncMock(return_value=draft()))
     response=api[0].post('/api/v1/travel/plans',json={'destination':'Agra','departure_date':START.isoformat(),
         'return_date':START.isoformat(),'hotel_preferences':{'rooms':1}})

@@ -136,3 +136,18 @@ uv run uvicorn virasatguide_backend.main:app --host 127.0.0.1 --port 8000
 ```
 
 Use your actual database name, and keep `MONGODB_URI` private in the backend environment. Dry-run does not write; apply backfills only login metadata and adds a partial unique index. Startup repeats this idempotently; colliding legacy names remain unchanged and require exact-case login. Never change the stable `username` account key to resolve a chosen login name. See [the exact contract, migration and verification guide](docs/frontend-contract.md) for collision handling, frontend checks, optional local Mongo tests and configuration. Deployed to the existing production backend on 2026-11-22. No production secrets were changed.
+
+## Repository guides
+
+| Area | Guide |
+| --- | --- |
+| Request lifecycle | [Backend package](src/virasatguide_backend/README.md) |
+| Authentication, health, monuments and audio | [Routes](src/virasatguide_backend/routes/README.md) |
+| MongoDB collections, indexes and account identity | [Data](src/virasatguide_backend/data/README.md) |
+| Shared story generation and persistence | [Services](src/virasatguide_backend/services/README.md) |
+| Tours, itinerary, travel search and PDF | [Travel](src/virasatguide_backend/travel/README.md) |
+| Research, writing and model fallback | [AI agent](ai_agent/README.md) |
+| API contracts, demo QA and release notes | [Documentation](docs/README.md) |
+| Regression, concurrency and frontend wrapper tests | [Tests](tests/README.md) |
+| Migration and real-service checks | [Scripts](scripts/README.md) |
+| Editor settings | [VS Code](.vscode/README.md) |

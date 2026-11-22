@@ -32,6 +32,7 @@ pytestmark = pytest.mark.skipif(not FRONTEND or not URI.startswith('mongodb://12
 
 
 def test_actual_frontend_wrappers_with_real_mongo(monkeypatch):
+    """Verify actual frontend wrappers with real MongoDB."""
     database_name = 'virasatguide_frontend_test_' + uuid4().hex
     monkeypatch.setenv('MONGODB_URI', URI)
     monkeypatch.setenv('MONGODB_DB', database_name)
@@ -42,6 +43,7 @@ def test_actual_frontend_wrappers_with_real_mongo(monkeypatch):
     monkeypatch.setenv('GOOGLE_CLIENT_SECRET', 'contract-test-secret')
     @asynccontextmanager
     async def test_lifespan(application):
+        """Populate the disposable database after the app starts."""
         async with lifespan(application):
             await application.state.database.monuments.insert_one({**MONUMENT,'location_tag':'Uttar Pradesh, India','cover_image':'https://example.org/taj.jpg'})
             yield
@@ -55,6 +57,7 @@ def test_actual_frontend_wrappers_with_real_mongo(monkeypatch):
     generate = AsyncMock(return_value=draft())
     monkeypatch.setattr(planner, 'generate_json', generate)
     async def answer(schema, instruction, context):
+        """Return seeded evidence, while allowing concurrent requests to read the same version."""
         await asyncio.sleep(0.02)  # Let concurrent questions read the same version.
         if 'weather' in context['question']:
             return AnswerDraft(answer='Not enough evidence',supported=False,evidence_ids=[])
@@ -63,6 +66,7 @@ def test_actual_frontend_wrappers_with_real_mongo(monkeypatch):
     monkeypatch.setattr(capabilities, 'ai_ready', AsyncMock(return_value=True))
     original_client = httpx.AsyncClient
     def upstream(request):
+        """Provide controlled Fish Audio and geocoder responses for the frontend integration."""
         if request.url.host == 'api.fish.audio':
             return httpx.Response(200,content=b'ID3'+b'fixture-audio'*100,headers={'content-type':'audio/mpeg'})
         if request.url.host == 'geocoding-api.open-meteo.com':
@@ -94,6 +98,7 @@ def test_actual_frontend_wrappers_with_real_mongo(monkeypatch):
         listener.close()
         app.dependency_overrides.clear()
         async def cleanup():
+            """Remove the uniquely named local MongoDB database used by the frontend contract test."""
             async with AsyncMongoClient(URI) as client:
                 assert database_name.startswith('virasatguide_frontend_test_')
                 await client.drop_database(database_name)

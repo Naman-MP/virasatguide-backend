@@ -13,6 +13,7 @@ from virasatguide_backend.main import app
 
 @pytest.mark.parametrize('available', [True, False])
 def test_database_health_and_ping(available):
+    """Verify database health and ping."""
     database = SimpleNamespace(command=AsyncMock(return_value={'ok': 1}))
     if not available:
         database.command.side_effect = PyMongoError('private connection details')

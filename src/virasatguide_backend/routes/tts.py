@@ -38,6 +38,7 @@ async def create_monument_audio(
     database=Depends(get_database),
     _user=Depends(get_current_user),
 ) -> Response:
+    """Synthesize a cached monument story with Fish Audio and return validated MP3 bytes."""
     try:
         monument = await get_monument(database, monument_id)
         if monument is None:

@@ -21,6 +21,7 @@ def public_source_url(value):
 
 
 class MonumentContext(BaseModel):
+    """Catalogue fields that the story workflow needs as input."""
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     id: int = Field(gt=0)
@@ -32,6 +33,7 @@ class MonumentContext(BaseModel):
 
 
 class Source(BaseModel):
+    """A search result with a display title, snippet, and public HTTP(S) URL."""
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     title: str = Field(min_length=1)
@@ -41,6 +43,7 @@ class Source(BaseModel):
 
 
 class StoryResult(BaseModel):
+    """Validated narration, evidence links, and source status for one monument."""
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     monument_id: int = Field(gt=0)

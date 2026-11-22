@@ -33,6 +33,7 @@ PLAN_INSTRUCTION = (
 
 
 def search_destination(request: PlanInput) -> list[Evidence]:
+    """Gather public travel evidence for a destination and optional area or coordinates."""
     location = " ".join(v for v in [request.destination, request.area, request.city] if v)
     query = f"{location} nearby attractions local food official tourism itinerary"
     if request.location:
@@ -74,6 +75,7 @@ def place_is_supported(stop, sources_by_id) -> bool:
 
 
 def draft_error(draft: PlanDraft, request: PlanInput, sources: list[Evidence]) -> str | None:
+    """Describe a draft's unsupported stops, invalid citations, or schedule problems."""
     if [day.day for day in draft.days] != list(range(1, request.days + 1)):
         return "Return exactly the requested consecutive days starting with 1."
     by_id = {source.id: source for source in sources}
@@ -129,6 +131,7 @@ def build_plan(request: PlanInput, draft: PlanDraft, sources: list[Evidence], ha
 
 
 async def create_plan(request: PlanInput, database, *, owner: str | None = None) -> TripPlan:
+    """Research destinations, validate the model draft, and calculate itinerary and offer costs."""
     extended = bool(request.origin or request.stops or request.departure_date or request.travel_mode or request.hotel_preferences)
     selected, offer_context, offer_warnings = None, {}, []
     if extended:

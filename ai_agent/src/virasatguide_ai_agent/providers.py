@@ -13,7 +13,9 @@ logger = logging.getLogger(__name__)
 
 
 class GenerationError(Exception):
+    """Carry a public error message, HTTP status, and model fallback decision."""
     def __init__(self, message: str, status_code=503, *, allow_fallback=True):
+        """Set the safe error message, HTTP status, and fallback policy."""
         super().__init__(message)
         self.status_code = status_code
         self.allow_fallback = allow_fallback
@@ -32,6 +34,7 @@ def generation_config() -> dict:
 
 
 async def gemini(instruction, context, schema, max_tokens, temperature):
+    """Request text or schema-constrained JSON from Gemini and omit reasoning parts."""
     model = generation_config()["gemini_model"]
     if not re.fullmatch(r"[A-Za-z0-9._-]+", model):
         raise GenerationError("Set GEMINI_MODEL to a valid Gemini model ID")
@@ -79,6 +82,7 @@ async def gemini(instruction, context, schema, max_tokens, temperature):
 
 
 async def ollama(instruction, context, schema, max_tokens, temperature):
+    """Request generation from the configured Ollama server and return its message text."""
     base = os.getenv("OLLAMA_BASE_URL", "http://127.0.0.1:11434").strip().rstrip("/")
     parsed = urlsplit(base)
     valid_address = parsed.scheme in {"http", "https"} and parsed.hostname

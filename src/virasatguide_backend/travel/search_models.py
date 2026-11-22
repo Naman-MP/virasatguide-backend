@@ -14,6 +14,7 @@ SearchStatus = Literal["complete", "partial", "unavailable"]
 
 
 def iso_date(value):
+    """Accept actual dates or strict ISO date strings for validation."""
     if value is None:
         return None
     if not isinstance(value, (str, date)) or isinstance(value, datetime):
@@ -24,6 +25,7 @@ def iso_date(value):
 
 
 def future_dates(start: date, end: date | None):
+    """Reject past departure dates and returns before departure."""
     if start < datetime.now(timezone.utc).date():
         raise ValueError("Travel dates must be today (UTC) or later")
     if end is not None and end < start:
@@ -31,6 +33,7 @@ def future_dates(start: date, end: date | None):
 
 
 def safe_booking_url(value):
+    """Accept only HTTPS booking links with no embedded credentials."""
     if value is None:
         return None
     if any(ord(char) <= 32 or ord(char) == 127 for char in str(value)):
@@ -46,26 +49,31 @@ def safe_booking_url(value):
 
 
 class SearchModel(BaseModel):
+    """Share strict field and finite-number validation across inventory schemas."""
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, allow_inf_nan=False, revalidate_instances="always")
 
 
 class Place(SearchModel):
+    """A traveler-visible route location label."""
     label: str = Field(min_length=1, max_length=200)
 
 
 class HotelPreferences(SearchModel):
+    """Room count and optional distinct hotel star ratings."""
     star_ratings: list[Annotated[int, Field(strict=True, ge=1, le=5)]] = Field(default_factory=list, max_length=5)
     rooms: int = Field(default=1, ge=1, le=20, strict=True)
 
     @field_validator("star_ratings")
     @classmethod
     def valid_stars(cls, values):
+        """Require distinct star values in the supported range."""
         if len(set(values)) != len(values) or any(v not in {1, 2, 3, 4, 5} for v in values):
             raise ValueError("star_ratings must contain distinct numbers from 1 to 5")
         return values
 
 
 class TransportSearchInput(SearchModel):
+    """Validated route, travel dates, party size, modes, and currency."""
     origin: Place
     destination: Place
     stops: list[Place] = Field(default_factory=list, max_length=6)
@@ -80,12 +88,14 @@ class TransportSearchInput(SearchModel):
     @field_validator("currency")
     @classmethod
     def valid_currency(cls, value):
+        """Require an ISO 4217 currency code."""
         if pycountry.currencies.get(alpha_3=value) is None:
             raise ValueError("Use an ISO 4217 currency code")
         return value
 
     @model_validator(mode="after")
     def valid_journey(self):
+        """Check travel dates, distinct modes, and consecutive route labels."""
         future_dates(self.departure_date, self.return_date)
         labels = [p.label.casefold() for p in [self.origin, *self.stops, self.destination]]
         if any(a == b for a, b in zip(labels, labels[1:])):
@@ -96,6 +106,7 @@ class TransportSearchInput(SearchModel):
 
 
 class HotelSearchInput(HotelPreferences):
+    """Validated destination, dates, room preferences, party size, and currency."""
     destination: str = Field(min_length=1, max_length=200)
     check_in: date
     check_out: date
@@ -106,6 +117,7 @@ class HotelSearchInput(HotelPreferences):
 
     @model_validator(mode="after")
     def valid_stay(self):
+        """Check date order and whether requested room count fits the party."""
         future_dates(self.check_in, self.check_out)
         if self.check_out <= self.check_in or (self.check_out - self.check_in).days > 30:
             raise ValueError("Stay length must be 1-30 nights")
@@ -115,9 +127,11 @@ class HotelSearchInput(HotelPreferences):
 
 
 class Price(SearchModel):
+    """A currency amount classified as a provider quote or an estimate."""
     @field_validator("amount", mode="before")
     @classmethod
     def numeric_amount(cls, value):
+        """Reject booleans before numeric price conversion."""
         if isinstance(value, bool):
             raise ValueError("A price must be a number, not a boolean")
         return value
@@ -128,6 +142,7 @@ class Price(SearchModel):
 
 
 class TransportOption(SearchModel):
+    """One attributed travel option with journey details and an optional price or booking link."""
     id: UUID = Field(default_factory=uuid4)
     mode: Mode
     provider: str = Field(min_length=1, max_length=120)
@@ -142,12 +157,14 @@ class TransportOption(SearchModel):
 
     @model_validator(mode="after")
     def valid_times(self):
+        """Reject an arrival that does not occur after departure."""
         if self.departure_at and self.arrival_at and self.arrival_at <= self.departure_at:
             raise ValueError("Arrival must follow departure")
         return self
 
 
 class HotelOption(SearchModel):
+    """One attributed hotel option with optional nightly and stay totals."""
     id: UUID = Field(default_factory=uuid4)
     hotel_name: str = Field(min_length=1, max_length=200)
     location: str = Field(min_length=1, max_length=200)
@@ -161,6 +178,7 @@ class HotelOption(SearchModel):
 
 
 class TransportSearchResult(SearchModel):
+    """Transport results with availability status, misses, and warnings."""
     search_id: UUID = Field(default_factory=uuid4)
     status: SearchStatus
     searched_at: AwareDatetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -171,6 +189,7 @@ class TransportSearchResult(SearchModel):
 
 
 class HotelSearchResult(SearchModel):
+    """Hotel results with availability status and warnings."""
     search_id: UUID = Field(default_factory=uuid4)
     status: SearchStatus
     searched_at: AwareDatetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -179,6 +198,7 @@ class HotelSearchResult(SearchModel):
 
 
 class PlanningOffers(SearchModel):
+    """Selected transport and hotel offers with optional room and stay details."""
     transport: TransportOption | None = None
     hotel: HotelOption | None = None
     hotel_rooms: int | None = Field(default=None, ge=1, le=20)
@@ -187,6 +207,7 @@ class PlanningOffers(SearchModel):
 
 
 class CostSummary(SearchModel):
+    """Separate confirmed provider totals from itinerary and quote estimates."""
     currency: str
     itinerary_estimate: int
     confirmed_total: float

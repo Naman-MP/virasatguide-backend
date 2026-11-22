@@ -11,6 +11,7 @@ from .search import provider_ready
 
 
 class Capabilities(BaseModel):
+    """Expose the readiness flags the frontend uses to enable travel features."""
     transport_search: bool
     hotel_search: bool
     extended_planning: bool
@@ -22,6 +23,7 @@ _ai_probe = {"config": None, "checked": 0.0, "ready": False}
 
 
 async def ai_ready() -> bool:
+    """Probe model generation with a short, cached request."""
     config = generation_config()
     now = time.monotonic()
     if _ai_probe["config"] == config and now - _ai_probe["checked"] < 60:
@@ -38,6 +40,7 @@ async def ai_ready() -> bool:
 
 
 async def get_capabilities(database) -> Capabilities:
+    """Combine database, inventory, and model checks into frontend readiness flags."""
     if not await is_database_available(database):
         return Capabilities(transport_search=False, hotel_search=False, extended_planning=False, profile_onboarding=False)
     transport = [await provider_ready(p) for p in search_providers.transport_providers]

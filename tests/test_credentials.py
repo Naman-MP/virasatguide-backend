@@ -17,10 +17,12 @@ PASSWORD = 'a-test-password'
 
 
 def headers(username='google:12345'):
+    """Build authorization headers from a disposable user's test token."""
     return {'Authorization': 'Bearer ' + create_access_token({'sub': username, 'version': 1})}
 
 
 def add_google(users, subject='12345'):
+    """Seed an isolated Google account for credential setup."""
     key = 'google:' + subject
     users.documents[key] = {'_id': subject, 'username': key, 'google_sub': subject,
                             'token_version': 1, 'onboarding_completed': False}
@@ -28,6 +30,7 @@ def add_google(users, subject='12345'):
 
 
 def test_google_credentials_keep_identity_and_password_login(google_flow):
+    """Verify Google credentials keep identity and password login."""
     api, users, google, key = google_flow
     query = start(api, 'continue')
     set_token(google, key, query)
@@ -70,6 +73,7 @@ def test_google_credentials_keep_identity_and_password_login(google_flow):
 
 
 def test_setup_auth_ownership_origin_and_private_fields(client):
+    """Verify setup auth ownership origin and private fields."""
     api, users = client
     first = add_google(users)
     second = add_google(users, 'second')
@@ -91,6 +95,7 @@ def test_setup_auth_ownership_origin_and_private_fields(client):
 
 @pytest.mark.parametrize('username', ['ab', 'x'*33, 'two words', 'google:123', 'GOOGLE:123', 'éclair', 'user@host', 'newline\n', ' user', 'user ', '$where'])
 def test_username_validation_and_no_password_echo(client, username):
+    """Verify username validation and no password echo."""
     api, users = client
     add_google(users)
     for path in ['/auth/credentials', '/auth/register']:
@@ -102,6 +107,7 @@ def test_username_validation_and_no_password_echo(client, username):
 
 @pytest.mark.parametrize('password', ['short', 'x'*129, 12345678, None, {'secret': 'value'}])
 def test_password_validation_does_not_echo_input(client, password):
+    """Verify password validation does not echo input."""
     api, users = client
     add_google(users)
     response = api.put('/auth/credentials', json={'username': 'Traveler', 'password': password}, headers=headers())
@@ -111,6 +117,7 @@ def test_password_validation_does_not_echo_input(client, password):
 
 @pytest.mark.parametrize('name,password', [('unknown', PASSWORD), ('Traveler', 'wrong')])
 def test_invalid_login_is_generic(client, name, password):
+    """Verify invalid login is generic."""
     api, users = client
     add_google(users)
     assert api.put('/auth/credentials', json={'username': 'Traveler', 'password': PASSWORD}, headers=headers()).status_code == 200
@@ -121,6 +128,7 @@ def test_invalid_login_is_generic(client, name, password):
 
 
 def test_legacy_names_are_reserved_and_login_is_case_insensitive(client):
+    """Verify legacy names are reserved and login is case insensitive."""
     api, users = client
     users.documents['Legacy.Name'] = {'_id': 'old-id', 'username': 'Legacy.Name', 'password': get_password_hash(PASSWORD)}
     add_google(users)
@@ -138,9 +146,11 @@ def test_legacy_names_are_reserved_and_login_is_case_insensitive(client):
 
 
 def test_two_setup_requests_for_same_account_are_atomic(client):
+    """Verify two setup requests for same account are atomic."""
     api, users = client
     add_google(users)
     def attempt(name):
+        """Send one of the competing credential requests."""
         return api.put('/auth/credentials', json={'username': name, 'password': PASSWORD}, headers=headers()).status_code
     with ThreadPoolExecutor(max_workers=2) as pool:
         results = list(pool.map(attempt, ['FirstName', 'SecondName']))
@@ -149,10 +159,12 @@ def test_two_setup_requests_for_same_account_are_atomic(client):
 
 
 def test_concurrent_case_insensitive_name_claims(client):
+    """Verify concurrent case insensitive name claims."""
     api, users = client
     add_google(users)
     add_google(users, 'second')
     def attempt(account_and_name):
+        """Send one of the competing credential requests."""
         account, name = account_and_name
         return api.put('/auth/credentials', json={'username': name, 'password': PASSWORD}, headers=headers(account)).status_code
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -162,6 +174,7 @@ def test_concurrent_case_insensitive_name_claims(client):
 
 
 def test_migration_is_preflighted_idempotent_and_keeps_identity():
+    """Verify migration is preflighted idempotent and keeps identity."""
     users = Users()
     password_hash = get_password_hash(PASSWORD)
     users.documents['Old.Name'] = {'_id': 'stable-id', 'username': 'Old.Name', 'password': password_hash}
@@ -180,6 +193,7 @@ def test_migration_is_preflighted_idempotent_and_keeps_identity():
 
 
 def test_migration_skips_colliding_legacy_accounts():
+    """Verify migration skips colliding legacy accounts."""
     users = Users()
     for name in ['Old.Name', 'OLD.NAME']:
         users.documents[name] = {'_id': name, 'username': name, 'password': 'unchanged-hash'}
@@ -190,16 +204,18 @@ def test_migration_skips_colliding_legacy_accounts():
 
 
 def test_ambiguous_legacy_login_requires_exact_case(client):
+    """Verify ambiguous legacy login requires exact case."""
     api, users = client
-    for name in ['Legacy', 'LEGACY']:
+    for name in ['Legacy', 'LEGACY', 'LegacY']:
         users.documents[name] = {'_id': name, 'username': name, 'password': get_password_hash(PASSWORD)}
     assert api.post('/auth/login', data={'username': 'legacy', 'password': PASSWORD}).status_code == 401
-    for name in ['Legacy', 'LEGACY']:
+    for name in ['Legacy', 'LEGACY', 'LegacY']:
         token = api.post('/auth/login', data={'username': name, 'password': PASSWORD}).json()['access_token']
         assert api.get('/auth/me', headers={'Authorization': 'Bearer '+token}).json()['username'] == name
 
 
 def test_no_email_linking_and_no_google_password_before_setup(google_flow):
+    """Verify no email linking and no Google password before setup."""
     api, users, google, key = google_flow
     users.documents['alice'] = {'_id': 'local', 'username': 'alice', 'password': get_password_hash(PASSWORD), 'email': 'alice@example.com'}
     query = start(api, 'continue')
@@ -211,6 +227,7 @@ def test_no_email_linking_and_no_google_password_before_setup(google_flow):
 
 
 def test_storage_errors_are_sanitized(client, monkeypatch):
+    """Verify storage errors are sanitized."""
     from pymongo.errors import PyMongoError
     api, users = client
     add_google(users)
@@ -221,6 +238,7 @@ def test_storage_errors_are_sanitized(client, monkeypatch):
 
 @pytest.mark.parametrize('name', ['x', 'Legacy'+'x'*40])
 def test_legacy_bcrypt_names_outside_new_signup_format_still_login(client, name):
+    """Verify legacy bcrypt names outside new signup format still login."""
     from pwdlib.hashers.bcrypt import BcryptHasher
     api, users = client
     users.documents[name] = {'_id': 'legacy-id', 'username': name, 'password': BcryptHasher().hash(PASSWORD)}

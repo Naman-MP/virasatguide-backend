@@ -12,10 +12,12 @@ from .search_models import (CostSummary, HotelOption, HotelSearchInput, Planning
 
 
 def same_label(a, b):
+    """Compare location labels without case or whitespace differences."""
     return " ".join(a.casefold().split()) == " ".join(b.casefold().split())
 
 
 async def owned_offer(database, owner, offer_id, kind):
+    """Fetch a matching offer only while it belongs to the traveler and is unexpired."""
     saved = await database.travel_offers.find_one({
         "_id": str(offer_id), "owner": owner, "kind": kind,
         "expires_at": {"$gt": datetime.now(timezone.utc)},
@@ -26,6 +28,7 @@ async def owned_offer(database, owner, offer_id, kind):
 
 
 async def planning_context(request, database, owner):
+    """Validate selected offers and collect available options for the model's planning context."""
     selected = PlanningOffers()
     context, warnings = {}, []
     if request.selected_transport_id:
@@ -88,6 +91,7 @@ async def planning_context(request, database, owner):
 
 
 def apply_offer_costs(plan, selected: PlanningOffers, warnings: list[str]):
+    """Combine validated quotes and estimates without charging accommodation twice."""
     prices = []
     if selected.transport:
         prices.append(selected.transport.price)

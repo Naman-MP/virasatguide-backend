@@ -11,6 +11,7 @@
           "Authentication"
         ],
         "summary": "Register User",
+        "description": "Create a local password account if its normalized login name is available.",
         "operationId": "register_user_auth_register_post",
         "requestBody": {
           "content": {
@@ -50,6 +51,7 @@
           "Authentication"
         ],
         "summary": "Login",
+        "description": "Verify submitted credentials and issue a token for the stable account identity.",
         "operationId": "login_auth_login_post",
         "requestBody": {
           "content": {
@@ -89,6 +91,7 @@
           "Authentication"
         ],
         "summary": "Logout",
+        "description": "Revoke all existing tokens for the current account and clear the browser cookie.",
         "operationId": "logout_auth_logout_post",
         "responses": {
           "200": {
@@ -113,6 +116,7 @@
           "Authentication"
         ],
         "summary": "Read Users Me",
+        "description": "Return the current account's public profile with private caching rules.",
         "operationId": "read_users_me_auth_me_get",
         "responses": {
           "200": {
@@ -139,6 +143,7 @@
           "Authentication"
         ],
         "summary": "Update Profile",
+        "description": "Save the signed-in user's personal details independently of login credentials.",
         "operationId": "update_profile_auth_profile_put",
         "requestBody": {
           "content": {
@@ -185,6 +190,7 @@
           "Authentication"
         ],
         "summary": "Set Credentials",
+        "description": "Atomically add first-time local credentials to the signed-in Google account.",
         "operationId": "set_credentials_auth_credentials_put",
         "requestBody": {
           "content": {
@@ -240,6 +246,7 @@
           "Health"
         ],
         "summary": "Root",
+        "description": "Return a public message confirming that the application responds.",
         "operationId": "root__get",
         "responses": {
           "200": {
@@ -259,6 +266,7 @@
           "Health"
         ],
         "summary": "Health",
+        "description": "Report application and database health with an appropriate HTTP status.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -278,6 +286,7 @@
           "Health"
         ],
         "summary": "Ping Db",
+        "description": "Check MongoDB connectivity and describe a failed ping without leaking internals.",
         "operationId": "ping_db_ping_db_get",
         "responses": {
           "200": {
@@ -492,6 +501,7 @@
           "AI agent"
         ],
         "summary": "Create Monument Story",
+        "description": "Require authentication and return the monument's saved or newly generated narration.",
         "operationId": "create_monument_story_api_v1_monuments__monument_id__story_post",
         "security": [
           {
@@ -549,6 +559,7 @@
           "Audio"
         ],
         "summary": "Create Monument Audio",
+        "description": "Synthesize a cached monument story with Fish Audio and return validated MP3 bytes.",
         "operationId": "create_monument_audio_api_v1_monuments__monument_id__audio_post",
         "security": [
           {
@@ -678,6 +689,7 @@
           "Travel"
         ],
         "summary": "Read Tour",
+        "description": "Return the user's saved tour with at most the latest three exchanges.",
         "operationId": "read_tour_api_v1_travel_tour_sessions__session_id__get",
         "security": [
           {
@@ -744,6 +756,7 @@
           "Travel"
         ],
         "summary": "Ask Question",
+        "description": "Answer from saved context, reuse matching retries, and save with a version check.",
         "operationId": "ask_question_api_v1_travel_tour_sessions__session_id__questions_post",
         "security": [
           {
@@ -885,6 +898,7 @@
           "Travel"
         ],
         "summary": "Read Plan",
+        "description": "Return the authenticated owner's stored itinerary without running the model again.",
         "operationId": "read_plan_api_v1_travel_plans__plan_id__get",
         "security": [
           {
@@ -1019,6 +1033,7 @@
           "Travel"
         ],
         "summary": "Capabilities",
+        "description": "Return a fresh or recently probed snapshot of feature readiness.",
         "operationId": "capabilities_api_v1_travel_capabilities_get",
         "responses": {
           "200": {
@@ -1058,6 +1073,7 @@
           "Travel"
         ],
         "summary": "Transport Search",
+        "description": "Compare supported journey options and return validated provider results.",
         "operationId": "transport_search_api_v1_travel_transport_search_post",
         "requestBody": {
           "content": {
@@ -1122,6 +1138,7 @@
           "Travel"
         ],
         "summary": "Hotels Search",
+        "description": "Compare supported stays and return validated provider results.",
         "operationId": "hotels_search_api_v1_travel_hotels_search_post",
         "requestBody": {
           "content": {
@@ -1273,6 +1290,7 @@
           "Authentication"
         ],
         "summary": "Google Login",
+        "description": "Start the Google flow for accounts that already exist.",
         "operationId": "google_login_auth_google_login_get",
         "responses": {
           "200": {
@@ -1312,6 +1330,7 @@
           "Authentication"
         ],
         "summary": "Google Signup",
+        "description": "Start the Google flow that allows creation of a new account.",
         "operationId": "google_signup_auth_google_signup_get",
         "responses": {
           "200": {
@@ -1331,6 +1350,7 @@
           "Authentication"
         ],
         "summary": "Google Callback",
+        "description": "Verify Google identity, resolve the stable account, and start an application session.",
         "operationId": "google_callback_auth_google_callback_get",
         "responses": {
           "200": {
@@ -1389,7 +1409,8 @@
           "evidence",
           "created_at"
         ],
-        "title": "Answer"
+        "title": "Answer",
+        "description": "Saved question and answer with support status, accepted evidence, and timestamp."
       },
       "Body_login_auth_login_post": {
         "properties": {
@@ -1476,7 +1497,8 @@
           "extended_planning",
           "profile_onboarding"
         ],
-        "title": "Capabilities"
+        "title": "Capabilities",
+        "description": "Expose the readiness flags the frontend uses to enable travel features."
       },
       "CostSummary": {
         "properties": {
@@ -1515,7 +1537,8 @@
           "trip_total",
           "costs_complete"
         ],
-        "title": "CostSummary"
+        "title": "CostSummary",
+        "description": "Separate confirmed provider totals from itinerary and quote estimates."
       },
       "CredentialsInput": {
         "properties": {
@@ -1541,7 +1564,8 @@
           "username",
           "password"
         ],
-        "title": "CredentialsInput"
+        "title": "CredentialsInput",
+        "description": "Validate a proposed local login name and protect the plaintext password in representations."
       },
       "Day": {
         "properties": {
@@ -1593,7 +1617,8 @@
           "accommodation_cost",
           "estimated_total"
         ],
-        "title": "Day"
+        "title": "Day",
+        "description": "Validated itinerary day with its server-calculated total."
       },
       "Evidence": {
         "properties": {
@@ -1639,7 +1664,8 @@
           "text",
           "kind"
         ],
-        "title": "Evidence"
+        "title": "Evidence",
+        "description": "Represent a named reference or excerpt that an answer or stop can cite."
       },
       "HTTPValidationError": {
         "properties": {
@@ -1737,7 +1763,8 @@
           "provider",
           "retrieved_at"
         ],
-        "title": "HotelOption"
+        "title": "HotelOption",
+        "description": "One attributed hotel option with optional nightly and stay totals."
       },
       "HotelPreferences": {
         "properties": {
@@ -1761,7 +1788,8 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "title": "HotelPreferences"
+        "title": "HotelPreferences",
+        "description": "Room count and optional distinct hotel star ratings."
       },
       "HotelSearchInput": {
         "properties": {
@@ -1819,7 +1847,8 @@
           "check_in",
           "check_out"
         ],
-        "title": "HotelSearchInput"
+        "title": "HotelSearchInput",
+        "description": "Validated destination, dates, room preferences, party size, and currency."
       },
       "HotelSearchResult": {
         "properties": {
@@ -1862,7 +1891,8 @@
         "required": [
           "status"
         ],
-        "title": "HotelSearchResult"
+        "title": "HotelSearchResult",
+        "description": "Hotel results with availability status and warnings."
       },
       "Location": {
         "properties": {
@@ -1885,7 +1915,8 @@
           "latitude",
           "longitude"
         ],
-        "title": "Location"
+        "title": "Location",
+        "description": "Validate optional latitude and longitude supplied for a trip."
       },
       "MonumentCard": {
         "properties": {
@@ -1923,7 +1954,8 @@
           "cover_image",
           "reference_text"
         ],
-        "title": "MonumentCard"
+        "title": "MonumentCard",
+        "description": "Public discovery and detail fields for a single monument."
       },
       "MonumentPage": {
         "properties": {
@@ -1954,7 +1986,8 @@
           "page",
           "page_size"
         ],
-        "title": "MonumentPage"
+        "title": "MonumentPage",
+        "description": "Search results plus total, page number, and page size for pagination."
       },
       "Place": {
         "properties": {
@@ -1970,7 +2003,8 @@
         "required": [
           "label"
         ],
-        "title": "Place"
+        "title": "Place",
+        "description": "A traveler-visible route location label."
       },
       "PlaceSuggestion": {
         "properties": {
@@ -2029,7 +2063,8 @@
           "latitude",
           "longitude"
         ],
-        "title": "PlaceSuggestion"
+        "title": "PlaceSuggestion",
+        "description": "Public location label, coordinates, and source attribution."
       },
       "PlanInput": {
         "properties": {
@@ -2217,7 +2252,8 @@
         "required": [
           "destination"
         ],
-        "title": "PlanInput"
+        "title": "PlanInput",
+        "description": "Capture the traveler's trip preferences, route, budget, and selected offers."
       },
       "PlanningOffers": {
         "properties": {
@@ -2281,7 +2317,8 @@
         },
         "additionalProperties": false,
         "type": "object",
-        "title": "PlanningOffers"
+        "title": "PlanningOffers",
+        "description": "Selected transport and hotel offers with optional room and stay details."
       },
       "Price": {
         "properties": {
@@ -2312,7 +2349,8 @@
           "currency",
           "type"
         ],
-        "title": "Price"
+        "title": "Price",
+        "description": "A currency amount classified as a provider quote or an estimate."
       },
       "ProfileUpdate": {
         "properties": {
@@ -2359,7 +2397,8 @@
         "required": [
           "full_name"
         ],
-        "title": "ProfileUpdate"
+        "title": "ProfileUpdate",
+        "description": "Validate the editable profile fields while keeping birth date optional."
       },
       "PublicProfile": {
         "properties": {
@@ -2468,7 +2507,8 @@
           "gender",
           "onboarding_completed"
         ],
-        "title": "PublicProfile"
+        "title": "PublicProfile",
+        "description": "List the profile fields that an authenticated user may receive."
       },
       "QuestionInput": {
         "properties": {
@@ -2496,7 +2536,8 @@
         "required": [
           "question"
         ],
-        "title": "QuestionInput"
+        "title": "QuestionInput",
+        "description": "Validate a follow-up question and its optional idempotency identifier."
       },
       "SessionInput": {
         "properties": {
@@ -2511,7 +2552,8 @@
         "required": [
           "monument_id"
         ],
-        "title": "SessionInput"
+        "title": "SessionInput",
+        "description": "Accept the positive monument ID used to start a tour."
       },
       "Source": {
         "properties": {
@@ -2540,7 +2582,8 @@
           "url",
           "snippet"
         ],
-        "title": "Source"
+        "title": "Source",
+        "description": "A search result with a display title, snippet, and public HTTP(S) URL."
       },
       "Stop": {
         "properties": {
@@ -2604,7 +2647,8 @@
           "estimated_cost",
           "evidence_ids"
         ],
-        "title": "Stop"
+        "title": "Stop",
+        "description": "One scheduled visit with duration, estimated cost, and evidence references."
       },
       "StoryResult": {
         "properties": {
@@ -2642,7 +2686,8 @@
           "sources",
           "research_status"
         ],
-        "title": "StoryResult"
+        "title": "StoryResult",
+        "description": "Validated narration, evidence links, and source status for one monument."
       },
       "TourSession": {
         "properties": {
@@ -2686,7 +2731,8 @@
           "created_at",
           "history"
         ],
-        "title": "TourSession"
+        "title": "TourSession",
+        "description": "Public view of a private tour and its recent question history."
       },
       "TransportOption": {
         "properties": {
@@ -2788,7 +2834,8 @@
           "service_name",
           "retrieved_at"
         ],
-        "title": "TransportOption"
+        "title": "TransportOption",
+        "description": "One attributed travel option with journey details and an optional price or booking link."
       },
       "TransportSearchInput": {
         "properties": {
@@ -2859,7 +2906,8 @@
           "destination",
           "departure_date"
         ],
-        "title": "TransportSearchInput"
+        "title": "TransportSearchInput",
+        "description": "Validated route, travel dates, party size, modes, and currency."
       },
       "TransportSearchResult": {
         "properties": {
@@ -2920,7 +2968,8 @@
           "status",
           "currency"
         ],
-        "title": "TransportSearchResult"
+        "title": "TransportSearchResult",
+        "description": "Transport results with availability status, misses, and warnings."
       },
       "TripPlan": {
         "properties": {
@@ -3039,7 +3088,8 @@
           "warnings",
           "proximity_status"
         ],
-        "title": "TripPlan"
+        "title": "TripPlan",
+        "description": "Saved itinerary with ownership-independent display data, costs, and sources."
       },
       "ValidationError": {
         "properties": {

@@ -30,6 +30,7 @@ UserCreate = CredentialsInput
 
 @router.post("/register", status_code=201)
 async def register_user(user: UserCreate, users=Depends(get_users_collection)):
+    """Create a local password account if its normalized login name is available."""
     try:
         if await users.find_one(login_name_query(user.username)):
             raise HTTPException(400, "Username already registered")
@@ -48,14 +49,16 @@ async def login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     users=Depends(get_users_collection),
 ):
+    """Verify submitted credentials and issue a token for the stable account identity."""
+    name_query = login_name_query(form_data.username)
     try:
-        matches = await users.find(login_name_query(form_data.username)).limit(2).to_list()
+        matches = await users.find(name_query).limit(2).to_list()
+        user = matches[0] if len(matches) == 1 else None
+        if len(matches) == 2:
+            # Ambiguous legacy logins must match the original casing, even if there are more than two.
+            user = await users.find_one({**name_query, "username": form_data.username})
     except PyMongoError as exc:
         raise HTTPException(503, "Account storage is unavailable") from exc
-    # An old pair differing only by case keeps its original exact-case login.
-    # Do not choose either account for a new case-insensitive spelling.
-    exact = [item for item in matches if item.get("username") == form_data.username]
-    user = matches[0] if len(matches) == 1 else exact[0] if len(exact) == 1 else None
     if not user or not await run_in_threadpool(
         verify_password, form_data.password, user.get("password") or ""
     ):
@@ -74,6 +77,7 @@ async def get_current_user(
     token: str | None = Depends(oauth2_scheme),
     users=Depends(get_users_collection),
 ):
+    """Authenticate a bearer or cookie token and enforce origin checks on cookie writes."""
     credentials_exception = HTTPException(
         status_code=401, detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
@@ -117,6 +121,7 @@ async def logout(
     users=Depends(get_users_collection),
 ):
     # Increment the version atomically; a missing version starts at 1.
+    """Revoke all existing tokens for the current account and clear the browser cookie."""
     await users.update_one(
         {"_id": current_user["_id"]},
         [{"$set": {"token_version": {"$add": [{"$ifNull": ["$token_version", 1]}, 1]}}}],
@@ -127,6 +132,7 @@ async def logout(
 
 @router.get("/me", response_model=PublicProfile)
 async def read_users_me(response: Response, current_user: dict = Depends(get_current_user)):
+    """Return the current account's public profile with private caching rules."""
     response.headers["Cache-Control"] = "private, no-store"
     return public_profile(current_user)
 
@@ -137,6 +143,7 @@ async def update_profile(
     current_user: dict = Depends(get_current_user), users=Depends(get_users_collection),
 ):
     # Ownership comes from the verified login, never from submitted profile fields.
+    """Save the signed-in user's personal details independently of login credentials."""
     fields = profile.model_dump(mode="json", exclude_unset=True)
     fields.setdefault("gender", "prefer_not_to_say")
     fields["onboarding_completed"] = True
@@ -161,6 +168,7 @@ async def set_credentials(
     credentials: CredentialsInput, response: Response,
     current_user: dict = Depends(get_current_user), users=Depends(get_users_collection),
 ):
+    """Atomically add first-time local credentials to the signed-in Google account."""
     if not current_user.get("google_sub"):
         raise HTTPException(403, "Credential setup requires a Google-linked account")
     if current_user.get("password") or public_login_fields(current_user)["credentials_set"]:

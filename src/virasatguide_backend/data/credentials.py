@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 
 class CredentialsInput(BaseModel):
+    """Validate a proposed local login name and protect the plaintext password in representations."""
     model_config = ConfigDict(extra="forbid")
     username: str = Field(min_length=3, max_length=32, pattern=r"^[A-Za-z0-9._-]+$")
     password: SecretStr = Field(min_length=8, max_length=128)
@@ -13,17 +14,20 @@ class CredentialsInput(BaseModel):
     @field_validator("username", mode="before")
     @classmethod
     def reject_reserved_name(cls, value):
+        """Keep the internal Google identity prefix outside the local login namespace."""
         if isinstance(value, str) and value.casefold().startswith("google:"):
             raise ValueError("The google: username prefix is reserved")
         return value
 
 
 def login_fields(username: str) -> dict:
+    """Build the display and normalized login fields stored in the account record."""
     return {"login_username": username, "login_username_normalized": username.casefold(),
             "credentials_set": True}
 
 
 def public_login_fields(user: dict) -> dict:
+    """Expose credential status and support accounts that still use a legacy login name."""
     name = user.get("login_username")
     if not name and not user.get("google_sub") and not user["username"].startswith("google:"):
         name = user["username"] if user.get("password") else None
@@ -32,6 +36,7 @@ def public_login_fields(user: dict) -> dict:
 
 def login_name_query(username: str) -> dict:
     # The fallback reserves old local usernames before their fields are backfilled.
+    """Find case-insensitive login names and reserve names from unmigrated local accounts."""
     return {"$or": [
         {"login_username_normalized": username.casefold()},
         {"login_username_normalized": {"$in": [None, ""]},

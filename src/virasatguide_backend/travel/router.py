@@ -32,6 +32,7 @@ router = APIRouter(prefix="/api/v1/travel", tags=["Travel"], responses={
 
 
 async def storage(database=Depends(get_database)):
+    """Translate MongoDB failures into the travel API's storage error response."""
     try:
         yield database
     except PyMongoError as exc:
@@ -43,6 +44,7 @@ User = Annotated[dict, Depends(get_current_user)]
 
 
 async def get_owned_document(collection, resource_id: UUID, user: dict):
+    """Read a private resource only when its owner matches the current user."""
     document = await collection.find_one({"_id": str(resource_id), "owner": user["username"]})
     if document is None:
         raise HTTPException(404, "Resource not found")
@@ -69,6 +71,7 @@ async def start_tour(request: SessionInput, database: Database, user: User):
 
 @router.get("/tour-sessions/{session_id}", response_model=TourSession)
 async def read_tour(session_id: UUID, database: Database, user: User):
+    """Return the user's saved tour with at most the latest three exchanges."""
     saved = await get_owned_document(database.tour_sessions, session_id, user)
     saved["view"]["history"] = saved["view"]["history"][-CHAT_HISTORY_LIMIT:]
     return TourSession.model_validate(saved["view"])
@@ -76,6 +79,7 @@ async def read_tour(session_id: UUID, database: Database, user: User):
 
 @router.post("/tour-sessions/{session_id}/questions", response_model=Answer)
 async def ask_question(session_id: UUID, request: QuestionInput, database: Database, user: User):
+    """Answer from saved context, reuse matching retries, and save with a version check."""
     saved = await get_owned_document(database.tour_sessions, session_id, user)
     request_id = request.request_id or uuid4()
     history = saved["view"]["history"][-CHAT_HISTORY_LIMIT:]
@@ -122,6 +126,7 @@ async def plan_trip(request: PlanInput, database: Database, user: User):
 
 @router.get("/plans/{plan_id}", response_model=TripPlan)
 async def read_plan(plan_id: UUID, database: Database, user: User):
+    """Return the authenticated owner's stored itinerary without running the model again."""
     saved = await get_owned_document(database.trip_plans, plan_id, user)
     return TripPlan.model_validate(saved["result"])
 
@@ -144,18 +149,21 @@ async def download_plan(plan_id: UUID, database: Database, user: User):
 
 @router.get("/capabilities", response_model=Capabilities)
 async def capabilities(response: Response, database: Database):
+    """Return a fresh or recently probed snapshot of feature readiness."""
     response.headers["Cache-Control"] = "no-store"
     return await get_capabilities(database)
 
 
 @router.post("/transport/search", response_model=TransportSearchResult)
 async def transport_search(request: TransportSearchInput, response: Response, database: Database, user: User):
+    """Compare supported journey options and return validated provider results."""
     response.headers["Cache-Control"] = "private, no-store"
     return await search_transport(request, database, user["username"])
 
 
 @router.post("/hotels/search", response_model=HotelSearchResult)
 async def hotels_search(request: HotelSearchInput, response: Response, database: Database, user: User):
+    """Compare supported stays and return validated provider results."""
     response.headers["Cache-Control"] = "private, no-store"
     return await search_hotels(request, database, user["username"])
 

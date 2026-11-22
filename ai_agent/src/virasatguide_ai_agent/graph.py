@@ -34,11 +34,14 @@ def clean_story_text(text: str) -> str:
 
 
 def build_graph():
+    """Compile the two-step research and narration workflow."""
     async def research(state: StoryState) -> dict:
+        """Find public references and record whether web research succeeded."""
         sources = await asyncio.to_thread(search_monument, state["monument"].name, state["monument"].city)
         return {"sources": sources, "research_status": "web_results" if sources else "database_only"}
 
     async def write(state: StoryState) -> dict:
+        """Turn monument context and search results into a cleaned narration."""
         current = state["monument"]
         context = json.dumps({
             **current.model_dump(),

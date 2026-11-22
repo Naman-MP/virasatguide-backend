@@ -38,5 +38,6 @@ app.add_middleware(
 @app.exception_handler(RequestValidationError)
 async def validation_error(request: Request, exc: RequestValidationError):
     # Validation errors must not echo submitted passwords or private request values.
+    """Return validation errors without echoing submitted values."""
     errors = [{key: error[key] for key in ("loc", "msg", "type")} for error in exc.errors()]
     return JSONResponse({"detail": errors}, status_code=422)

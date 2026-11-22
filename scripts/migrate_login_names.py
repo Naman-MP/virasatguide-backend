@@ -17,6 +17,7 @@ from virasatguide_backend.data.credentials import migrate_login_names
 
 
 async def main():
+    """Parse the migration options and audit or update the selected database."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--database", required=True, help="Explicit MongoDB database to audit")
     parser.add_argument("--apply", action="store_true", help="Apply the audited, idempotent migration")

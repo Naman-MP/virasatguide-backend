@@ -6,6 +6,7 @@ from .search_models import HotelOption, HotelSearchInput, Mode, TransportOption,
 
 
 class TransportProvider(Protocol):
+    """Contract for a licensed adapter that supplies complete priced journeys."""
     name: str
     modes: set[Mode]
     max_stops: int
@@ -25,11 +26,16 @@ class TransportProvider(Protocol):
 
 
 class HotelProvider(Protocol):
+    """Contract for a licensed adapter that supplies stay inventory."""
     name: str
     booking_hosts: set[str]
 
-    async def is_ready(self) -> bool: ...
-    def supports(self, request: HotelSearchInput) -> bool: ...
+    async def is_ready(self) -> bool:
+        """Check authenticated provider readiness with its configured upstream service."""
+        ...
+    def supports(self, request: HotelSearchInput) -> bool:
+        """Report whether the adapter can handle the requested stay."""
+        ...
 
     async def search(self, request: HotelSearchInput) -> list[HotelOption]:
         """Prices cover all requested rooms; total_price covers the entire stay."""

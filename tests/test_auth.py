@@ -17,6 +17,7 @@ from virasatguide_backend.data.security import ALGORITHM, get_password_hash, ver
 
 
 def matches(document, query):
+    """Apply the subset of MongoDB filters that these fixtures exercise."""
     for key, expected in query.items():
         value = document.get(key)
         if key == "$or":
@@ -37,27 +38,36 @@ def matches(document, query):
 
 
 class Cursor:
+    """Model the MongoDB cursor operations needed by account tests."""
     def __init__(self, documents):
+        """Initialize the fixture state for the operations used in these tests."""
         self.documents = documents
     def limit(self, count):
+        """Bound the number of records returned by the fixture cursor."""
         self.documents = self.documents[:count]
         return self
     async def to_list(self):
+        """Collect fixture cursor results."""
         return copy.deepcopy(self.documents)
 
 
 class Users:
+    """Provide an in-memory account store with MongoDB-style matching and uniqueness."""
     def __init__(self):
+        """Initialize the fixture state for the operations used in these tests."""
         self.documents = {}
         self.indexes = []
 
     def find(self, query, projection=None):
+        """Return fixture records matching the requested fields."""
         return Cursor([d for d in self.documents.values() if matches(d, query)])
 
     async def find_one(self, query):
+        """Return the matching fixture document when it exists."""
         return next((copy.deepcopy(d) for d in self.documents.values() if matches(d, query)), None)
 
     def check_unique(self, document):
+        """Enforce the same account or offer keys checked by the real store."""
         for other in self.documents.values():
             if other.get('_id') == document.get('_id'):
                 continue
@@ -67,15 +77,18 @@ class Users:
                 raise DuplicateKeyError('duplicate')
 
     async def insert_one(self, document):
+        """Persist a test document in the fixture store."""
         document = dict(document)
         document.setdefault('_id', 'test-id' if not self.documents else 'test-id-' + str(len(self.documents)))
         self.check_unique(document)
         self.documents[document['username']] = document
 
     async def create_index(self, field, **options):
+        """Record which indexes the application attempts to create."""
         self.indexes.append((field, options))
 
     async def update_one(self, query, update):
+        """Apply the subset of update operators required by the test."""
         for document in self.documents.values():
             if matches(document, query):
                 if isinstance(update, list):
@@ -88,6 +101,7 @@ class Users:
         return SimpleNamespace(modified_count=0)
 
     async def find_one_and_update(self, query, update, **kwargs):
+        """Apply the fixture's atomic update and return the stored winner."""
         for document in self.documents.values():
             if matches(document, query):
                 candidate = {**document, **update['$set']}
@@ -99,6 +113,7 @@ class Users:
 
 @pytest.fixture
 def client(monkeypatch):
+    """Provide the FastAPI test client and isolated state for this module."""
     monkeypatch.setenv('JWT_SECRET_KEY', 'test-only-signing-secret-at-least-32-characters')
     users = Users()
     app.dependency_overrides[database.get_users_collection] = lambda: users
@@ -109,6 +124,7 @@ def client(monkeypatch):
 
 
 def test_register_login_profile_logout(client):
+    """Verify register login profile logout."""
     api, users = client
     credentials = {'username': 'alice', 'password': 'test-password'}
     assert api.post('/auth/register', json=credentials).status_code == 201
@@ -125,6 +141,7 @@ def test_register_login_profile_logout(client):
 
 
 def test_legacy_token_version_and_bad_password(client):
+    """Verify legacy token version and bad password."""
     api, users = client
     users.documents['legacy'] = {'_id': 'test-id', 'username': 'legacy', 'password': get_password_hash('test-password')}
     assert api.post('/auth/login', data={'username': 'legacy', 'password': 'wrong'}).status_code == 401
@@ -137,6 +154,7 @@ def test_legacy_token_version_and_bad_password(client):
 
 
 def test_invalid_expired_and_incomplete_tokens(client, monkeypatch):
+    """Verify invalid expired and incomplete tokens."""
     api, _ = client
     secret = 'test-only-signing-secret-at-least-32-characters'
     for payload in [
@@ -153,6 +171,7 @@ def test_invalid_expired_and_incomplete_tokens(client, monkeypatch):
 
 
 def test_registration_race(client, monkeypatch):
+    """Verify registration race."""
     api, users = client
     monkeypatch.setattr(users, 'find_one', AsyncMock(return_value=None))
     monkeypatch.setattr(users, 'insert_one', AsyncMock(side_effect=DuplicateKeyError('duplicate')))
@@ -161,19 +180,23 @@ def test_registration_race(client, monkeypatch):
 
 @pytest.mark.parametrize('failure', [False, True])
 def test_database_lifecycle(monkeypatch, failure):
+    """Verify database lifecycle."""
     import asyncio
     monkeypatch.setenv('MONGODB_URI', 'mongodb://localhost')
     monkeypatch.setenv('JWT_SECRET_KEY', 'test-only-signing-secret-at-least-32-characters')
     fake_db = SimpleNamespace(users=Users(), monuments=SimpleNamespace(create_index=AsyncMock()), tour_stories=SimpleNamespace(create_index=AsyncMock()), travel_offers=SimpleNamespace(create_index=AsyncMock()))
     class Client:
+        """Represent a MongoDB client that exposes only the startup operations under test."""
         admin = SimpleNamespace(command=AsyncMock(side_effect=ConnectionFailure('offline') if failure else None))
         close = AsyncMock()
         def __getitem__(self, name):
+            """Resolve the fixture database by its requested name."""
             return fake_db
     client = Client()
     monkeypatch.setattr(database, 'AsyncMongoClient', lambda *a, **k: client)
     app_stub = SimpleNamespace(state=SimpleNamespace())
     async def check():
+        """Run the database lifecycle with the configured success or failure fixture."""
         if failure:
             with pytest.raises(ConnectionFailure):
                 async with database.lifespan(app_stub):

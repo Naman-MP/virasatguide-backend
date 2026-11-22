@@ -12,6 +12,7 @@ STOP_WORDS = set("the a an is was were are of to in and it that this what who wh
 
 
 def story_evidence(monument: dict, result: dict) -> list[Evidence]:
+    """Collect the monument reference, stored narration, and search excerpts for retrieval."""
     documents = [
         ("reference", monument["name"] + " database reference", monument["reference_text"], "monument_reference", None),
         ("story", monument["name"] + " generated narration", result["story"], "generated_story", None),
@@ -28,10 +29,12 @@ def story_evidence(monument: dict, result: dict) -> list[Evidence]:
 
 
 def tokens(text: str) -> set[str]:
+    """Normalize words for matching a question to saved evidence."""
     return set(re.findall(r"\w+", text.casefold())) - STOP_WORDS
 
 
 def retrieve(question: str, evidence: list[Evidence], previous_question: str = "") -> list[Evidence]:
+    """Rank saved passages by the keywords they share with the question."""
     query = tokens(question + " " + previous_question)
     # More shared words means a passage is more relevant. Ties keep source order.
     ranked = sorted(evidence, key=lambda item: len(query & tokens(item.text)), reverse=True)
@@ -39,6 +42,7 @@ def retrieve(question: str, evidence: list[Evidence], previous_question: str = "
 
 
 async def answer_question(question: str, chunks: list[Evidence], history: list[dict]):
+    """Answer from retrieved evidence and reject citations outside that evidence."""
     previous = history[-1]["question"] if history else ""
     selected = retrieve(question, chunks, previous)
     draft = await generate_json(

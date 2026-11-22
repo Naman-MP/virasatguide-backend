@@ -30,6 +30,7 @@ STORY = StoryResult(monument_id=1, story="Shah Jahan commissioned this marble mo
 
 
 def draft(days=1):
+    """Build a valid itinerary draft that tests can selectively change."""
     return PlanDraft(title="Agra in a day", summary="A relaxed heritage visit.", days=[
         {"day": i, "title": "Marble and gardens", "stops": [{
             "place_name": "Taj Mahal", "area": "Taj Ganj", "time_of_day": "morning",
@@ -40,18 +41,23 @@ def draft(days=1):
 
 
 class Collection:
+    """Persist fixture documents with owner, version, and history checks."""
     def __init__(self):
+        """Initialize the fixture state for the operations used in these tests."""
         self.docs = {}
         self.force_conflict = False
 
     async def insert_one(self, doc):
+        """Persist a test document in the fixture store."""
         self.docs[doc["_id"]] = copy.deepcopy(doc)
 
     async def find_one(self, query):
+        """Return the matching fixture document when it exists."""
         doc = self.docs.get(query["_id"])
         return copy.deepcopy(doc) if doc and doc["owner"] == query["owner"] else None
 
     async def update_one(self, query, update):
+        """Apply the subset of update operators required by the test."""
         doc = self.docs[query["_id"]]
         if self.force_conflict or doc["version"] != query["version"]:
             return SimpleNamespace(modified_count=0)
@@ -62,16 +68,25 @@ class Collection:
 
 
 class Monuments:
+    """Provide the catalogue cursor operations used during plan creation."""
     def find(self, query, fields):
+        """Return fixture records matching the requested fields."""
         self.query = query
         return self
-    def sort(self, *args): return self
-    def limit(self, *args): return self
-    async def to_list(self): return [MONUMENT]
+    def sort(self, *args):
+        """Order fixture records by the requested field and direction."""
+        return self
+    def limit(self, *args):
+        """Bound the number of records returned by the fixture cursor."""
+        return self
+    async def to_list(self):
+        """Collect fixture cursor results."""
+        return [MONUMENT]
 
 
 @pytest.fixture
 def api(monkeypatch):
+    """Provide the test API and fixture state."""
     db = SimpleNamespace(tour_sessions=Collection(), trip_plans=Collection(), monuments=Monuments())
     app.dependency_overrides[get_database] = lambda: db
     app.dependency_overrides[get_users_collection] = lambda: object()
@@ -87,6 +102,7 @@ def api(monkeypatch):
 
 
 def test_travel_auth_and_invalid_inputs(api):
+    """Verify travel auth and invalid inputs."""
     client, _ = api
     app.dependency_overrides.pop(get_current_user)
     assert client.post("/api/v1/travel/plans", json={"destination": "Agra"}).status_code == 401
@@ -99,6 +115,7 @@ def test_travel_auth_and_invalid_inputs(api):
 
 
 def test_session_retrieval_chat_retry_and_ownership(api):
+    """Verify session retrieval chat retry and ownership."""
     client, db = api
     response = client.post("/api/v1/travel/tour-sessions", json={"monument_id": 1})
     assert response.status_code == 201
@@ -121,6 +138,7 @@ def test_session_retrieval_chat_retry_and_ownership(api):
 
 
 def test_rag_uses_facts_and_declines_unsupported(monkeypatch):
+    """Verify retrieval uses facts and declines unsupported."""
     chunks = retrieval.story_evidence(MONUMENT, STORY.model_dump(mode="json"))
     assert retrieval.retrieve("1632", chunks)[0].id == "reference-1"
     call = AsyncMock(return_value=AnswerDraft(answer="An unsupported guess", supported=False, evidence_ids=[]))
@@ -134,6 +152,7 @@ def test_rag_uses_facts_and_declines_unsupported(monkeypatch):
 
 
 def test_plan_budget_saved_pdf_and_ownership(api):
+    """Verify plan budget saved PDF and ownership."""
     client, _ = api
     response = client.post("/api/v1/travel/plans", json={"destination": "Agra", "area": "Taj Ganj", "budget": 600})
     assert response.status_code == 201, response.text
@@ -159,6 +178,7 @@ def test_plan_budget_saved_pdf_and_ownership(api):
 
 @pytest.mark.parametrize("budget,status", [(None, "not_set"), (700, "within_budget"), (0, "over_budget")])
 def test_budget_modes(api, budget, status):
+    """Verify budget modes."""
     client, _ = api
     response = client.post("/api/v1/travel/plans", json={"destination": "Agra", "budget": budget,
         "location": {"latitude": 27.1751, "longitude": 78.0421}})
@@ -167,6 +187,7 @@ def test_budget_modes(api, budget, status):
 
 
 def test_plan_rejects_wrong_days_unknown_sources_and_bad_schedule(api, monkeypatch):
+    """Verify plan rejects wrong days unknown sources and bad schedule."""
     client, _ = api
     assert client.post("/api/v1/travel/plans", json={"destination": "Agra", "days": 2}).status_code == 502
     model = draft()
@@ -181,6 +202,7 @@ def test_plan_rejects_wrong_days_unknown_sources_and_bad_schedule(api, monkeypat
 
 
 def test_storage_failure_has_clear_response(api, monkeypatch):
+    """Verify storage failure has clear response."""
     client, db = api
     monkeypatch.setattr(db.trip_plans, "find_one", AsyncMock(side_effect=PyMongoError("offline")))
     assert client.get(f"/api/v1/travel/plans/{uuid4()}").status_code == 503
@@ -188,9 +210,11 @@ def test_storage_failure_has_clear_response(api, monkeypatch):
 
 @pytest.mark.parametrize("mode,code", [("invalid", 502), ("missing", 503), ("timeout", 504), ("offline", 503)])
 def test_ollama_error_mapping(monkeypatch, mode, code):
+    """Verify Ollama error mapping."""
     monkeypatch.setenv("OLLAMA_MODEL", "test-model")
     original = httpx.AsyncClient
     def handle(request):
+        """Act as the upstream transport for the response or error under test."""
         if mode == "timeout": raise httpx.ReadTimeout("slow")
         if mode == "offline": raise httpx.ConnectError("offline")
         return httpx.Response(404 if mode == "missing" else 200, json={"message": {"content": "{}"}})
@@ -202,6 +226,7 @@ def test_ollama_error_mapping(monkeypatch, mode, code):
 
 
 def test_pdf_handles_long_content_and_markup():
+    """Verify PDF handles long content and markup."""
     data = draft(7)
     for day in data.days:
         day.stops[0].description = "Historic gardens <with> fountains & paths. " * 20
@@ -218,6 +243,7 @@ def test_pdf_handles_long_content_and_markup():
 
 
 def test_empty_catalogue_and_failed_search_returns_service_error(api, monkeypatch):
+    """Verify empty catalogue and failed search returns service error."""
     client, db = api
     monkeypatch.setattr(db.monuments, "to_list", AsyncMock(return_value=[]))
     response = client.post("/api/v1/travel/plans", json={"destination": "Unknown place"})
@@ -225,6 +251,7 @@ def test_empty_catalogue_and_failed_search_returns_service_error(api, monkeypatc
 
 
 def test_followup_history_is_capped(api):
+    """Verify followup history is capped."""
     client, _ = api
     session = client.post("/api/v1/travel/tour-sessions", json={"monument_id": 1}).json()["session_id"]
     path = f"/api/v1/travel/tour-sessions/{session}"
@@ -238,11 +265,16 @@ def test_followup_history_is_capped(api):
 
 
 def test_web_search_fallback_uses_area_coordinates_and_rejects_unsafe_urls(monkeypatch):
+    """Verify web search fallback uses area coordinates and rejects unsafe urls."""
     from ddgs.exceptions import DDGSException
     queries = []
     class Search:
-        def __init__(self, **kwargs): pass
+        """Simulate web search results for evidence fallback tests."""
+        def __init__(self, **kwargs):
+            """Initialize the fixture state for the operations used in these tests."""
+            pass
         def text(self, query, **kwargs):
+            """Simulate the search engine response for the requested provider."""
             queries.append((query, kwargs["backend"]))
             if kwargs["backend"] == "duckduckgo": raise DDGSException("failed")
             return [{"title": "Official tourism", "href": "https://example.org/agra", "body": "Visit the Taj Mahal in Agra."},
@@ -256,16 +288,19 @@ def test_web_search_fallback_uses_area_coordinates_and_rejects_unsafe_urls(monke
 
 
 def test_literal_escapes_and_html_are_plain_text():
+    """Verify literal escapes and html are plain text."""
     assert QuestionInput(question=r"Who\n built\t it?").question == "Who built it?"
     with pytest.raises(ValidationError):
         QuestionInput(question=r"\n\t")
 
 
 def test_ollama_accepts_validated_json(monkeypatch):
+    """Verify Ollama accepts validated JSON."""
     monkeypatch.setenv("OLLAMA_THINK", "false")
     monkeypatch.setenv("OLLAMA_MODEL", "test-model")
     original = httpx.AsyncClient
     def handle(request):
+        """Act as the upstream transport for the response or error under test."""
         import json
         payload = json.loads(request.content)
         assert payload["format"]["properties"]["answer"]["type"] == "string"
@@ -277,6 +312,7 @@ def test_ollama_accepts_validated_json(monkeypatch):
 
 
 def test_plan_rejects_invented_venue_and_repairs_once(api, monkeypatch):
+    """Verify plan rejects invented venue and repairs once."""
     client, _ = api
     invalid = draft()
     invalid.days[0].stops[0].place_name = "Invented Palace Restaurant"
@@ -291,6 +327,7 @@ def test_plan_rejects_invented_venue_and_repairs_once(api, monkeypatch):
 
 @pytest.mark.parametrize("fallback", [False, True])
 def test_plan_endpoint_uses_shared_primary_and_fallback_provider(api, monkeypatch, fallback):
+    """Verify plan endpoint uses shared primary and fallback provider."""
     import json
     client, _ = api
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
@@ -298,6 +335,7 @@ def test_plan_endpoint_uses_shared_primary_and_fallback_provider(api, monkeypatc
     original = httpx.AsyncClient
     seen = []
     def handle(request):
+        """Act as the upstream transport for the response or error under test."""
         seen.append(request.url.host)
         if request.url.host == "generativelanguage.googleapis.com":
             body = json.loads(request.content)
@@ -316,12 +354,14 @@ def test_plan_endpoint_uses_shared_primary_and_fallback_provider(api, monkeypatc
 
 
 def test_question_endpoint_uses_gemini_with_retrieved_evidence(api, monkeypatch):
+    """Verify question endpoint uses Gemini with retrieved evidence."""
     import json
     client, _ = api
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(retrieval, "generate_json", llm.generate_json)
     original = httpx.AsyncClient
     def handle(request):
+        """Act as the upstream transport for the response or error under test."""
         context = json.loads(json.loads(request.content)["contents"][0]["parts"][0]["text"])
         assert "Shah Jahan" in str(context)
         result = {"answer": "Shah Jahan commissioned it.", "evidence_ids": ["reference-1"], "supported": True}
@@ -336,15 +376,18 @@ def test_question_endpoint_uses_gemini_with_retrieved_evidence(api, monkeypatch)
 
 @pytest.mark.parametrize("interests", [[""], ["   "], ["a" * 81], ["history"] * 9])
 def test_plan_rejects_invalid_interests(interests):
+    """Verify plan rejects invalid interests."""
     with pytest.raises(ValidationError):
         PlanInput(destination="Agra", interests=interests)
 
 
 def test_plan_trims_interest_names():
+    """Verify plan trims interest names."""
     assert PlanInput(destination="Agra", interests=[" heritage "]).interests == ["heritage"]
 
 
 def test_retrieval_prefers_matching_passages_and_keeps_four():
+    """Verify retrieval prefers matching passages and keeps four."""
     chunks = [Evidence(id=str(i), title="Tour notes", text=text, kind="monument_reference")
               for i, text in enumerate(["red sandstone walls", "marble", "marble gardens", "river bank", "local food"])]
     selected = retrieval.retrieve("marble gardens", chunks)
@@ -353,9 +396,11 @@ def test_retrieval_prefers_matching_passages_and_keeps_four():
 
 
 def test_get_saved_plan_and_pdf_never_regenerate(api, monkeypatch):
+    """Verify get saved plan and PDF never regenerate."""
     client, _ = api
     plan = client.post('/api/v1/travel/plans', json={'destination': 'Agra'}).json()
     def fail(*args, **kwargs):
+        """Raise an intentional storage error to exercise the route's error handling."""
         raise AssertionError('Saved plan retrieval must not generate or search')
     monkeypatch.setattr(planner, 'search_destination', fail)
     monkeypatch.setattr(planner, 'generate_json', fail)
@@ -369,10 +414,12 @@ def test_get_saved_plan_and_pdf_never_regenerate(api, monkeypatch):
                                    {'location': {'latitude': 'NaN', 'longitude': 0}}, {'currency': 'ZZZ'},
                                    {'stops': [{'label': str(i)} for i in range(7)]}])
 def test_frontend_plan_limits_and_untrusted_numbers(api, change):
+    """Verify frontend plan limits and untrusted numbers."""
     assert api[0].post('/api/v1/travel/plans', json={'destination': 'Agra', **change}).status_code == 422
 
 
 def test_frontend_supports_six_stops_and_twenty_rooms():
+    """Verify frontend supports six stops and twenty rooms."""
     from virasatguide_backend.travel.search_models import TransportSearchInput, HotelSearchInput
     from datetime import timedelta
     start = (datetime.now(timezone.utc) + timedelta(days=20)).date().isoformat()
@@ -387,6 +434,7 @@ def test_frontend_supports_six_stops_and_twenty_rooms():
 
 @pytest.mark.parametrize('url', ['javascript:alert(1)', 'https://user:password@example.org', 'https://example.org/?api_key=secret', 'https://example.org/\nunsafe'])
 def test_evidence_urls_are_public_and_without_credentials(url):
+    """Verify evidence urls are public and without credentials."""
     from virasatguide_ai_agent.models import Source
     with pytest.raises(ValidationError):
         Evidence(id='web-1', title='Source', text='Facts', kind='web_snippet', url=url)

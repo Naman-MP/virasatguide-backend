@@ -8,11 +8,13 @@ const [frontend, base] = process.argv.slice(2);
 const storage = new Map();
 const cookies = new Map();
 const realFetch = globalThis.fetch;
+// Simulate the browser storage and location surfaces used by the frontend scripts.
 globalThis.window = {
     VIRASAT_API_BASE_URL: base,
     location: {hostname: 'localhost', assign(url) {this.next = url;}},
     localStorage: {getItem: key => storage.get(key) ?? null, setItem: (key,value) => storage.set(key,String(value)), removeItem: key => storage.delete(key)}
 };
+/** Keep session cookies and the local frontend origin across contract requests. */
 globalThis.fetch = async (url, options = {}) => {
     const headers = new Headers(options.headers);
     headers.set('Origin', 'http://localhost:5173');
@@ -29,6 +31,7 @@ globalThis.fetch = async (url, options = {}) => {
 };
 for (const file of ['src/api.js','src/auth.js']) vm.runInThisContext(readFileSync(join(frontend,file),'utf8'), {filename:file});
 const api = window.VirasatAPI, auth = window.VirasatAuth;
+/** Report a completed frontend flow after its assertions pass. */
 const passed = name => console.log('PASS frontend wrappers:',name);
 const monuments = await api.monuments({search:'Taj',city:'Agra'});
 assert.equal(monuments[0].id,1);
@@ -56,6 +59,7 @@ const answer = await api.askQuestion(session.session_id,'Who commissioned it?',r
 assert.ok(answer.supported && answer.evidence[0].text);
 assert.deepEqual(await api.askQuestion(session.session_id,'Who commissioned it?',requestId),answer);
 assert.equal((await api.getSession(session.session_id)).history.length,3);
+// Reuse a request ID to simulate simultaneous retries of the same question.
 const concurrentId = crypto.randomUUID();
 const simultaneous = await Promise.allSettled([
     api.askQuestion(session.session_id,'Who commissioned this monument?',concurrentId),
@@ -97,6 +101,7 @@ assert.deepEqual(await api.getPlan(plan.plan_id),plan);
 assert.ok((await (await api.pdf(plan.plan_id)).text()).startsWith('%PDF'));
 passed('extended itinerary, server totals, saved response and PDF download');
 
+// Credential setup must keep the established Google account and its saved records.
 const profile = await auth.updateProfile({full_name:'Actual Submitted Name',gender:'prefer_not_to_say'});
 assert.equal(profile.date_of_birth,null);
 assert.equal(profile.onboarding_completed,true);

@@ -18,7 +18,9 @@ pytestmark = pytest.mark.skipif(not URI.startswith('mongodb://127.0.0.1:'), reas
 
 
 def test_real_mongo_migration_and_concurrent_credentials():
+    """Verify real MongoDB migration and concurrent credentials."""
     async def check():
+        """Run migration and credential races against a temporary MongoDB database."""
         client = AsyncMongoClient(URI, serverSelectionTimeoutMS=3000)
         name = 'virasatguide_credentials_test_' + uuid4().hex
         db = client[name]
@@ -41,6 +43,7 @@ def test_real_mongo_migration_and_concurrent_credentials():
             assert 'username_1' in indexes
             app.dependency_overrides[get_users_collection] = lambda: users
             def headers(subject):
+                """Build authorization headers from a disposable user's test token."""
                 return {'Authorization': 'Bearer ' + create_access_token({'sub': 'google:' + subject, 'version': 1})}
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url='http://testserver') as api:
                 responses = await asyncio.gather(*[

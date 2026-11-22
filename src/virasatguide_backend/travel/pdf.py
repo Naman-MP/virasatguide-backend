@@ -21,6 +21,7 @@ CREAM = colors.HexColor("#F5F1E8")
 
 def render_plan_pdf(plan: TripPlan) -> bytes:
     # ReportLab bundles Vera, so exported PDFs have consistent embedded fonts.
+    """Render the saved itinerary and cost summary into downloadable PDF bytes."""
     font_dir = Path(reportlab.__file__).parent / "fonts"
     if "Virasat" not in pdfmetrics.getRegisteredFontNames():
         pdfmetrics.registerFont(TTFont("Virasat", str(font_dir / "Vera.ttf")))
@@ -35,12 +36,15 @@ def render_plan_pdf(plan: TripPlan) -> bytes:
     stop_title = ParagraphStyle("StopTitle", parent=body, fontName="VirasatBold", fontSize=11)
 
     def paragraph(text, style=body):
+        """Escape user and model text before passing it to ReportLab."""
         return Paragraph(escape(str(text)), style)
 
     def format_money(amount):
+        """Format an amount in the itinerary's currency."""
         return f"{plan.request.currency} {amount:,}"
 
     def draw_page(canvas, doc):
+        """Draw the layout elements that repeat on each PDF page."""
         canvas.saveState()
         canvas.setFillColor(INK)
         canvas.rect(0, A4[1] - 40, A4[0], 40, fill=1, stroke=0)

@@ -12,6 +12,7 @@ Gender = Literal["male", "female", "non_binary", "other", "prefer_not_to_say"]
 
 
 class ProfileUpdate(BaseModel):
+    """Validate the editable profile fields while keeping birth date optional."""
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     full_name: str = Field(min_length=1, max_length=120)
     date_of_birth: date | None = None
@@ -20,6 +21,7 @@ class ProfileUpdate(BaseModel):
     @field_validator("date_of_birth", mode="before")
     @classmethod
     def check_birth_date(cls, value):
+        """Require a valid YYYY-MM-DD date between 1900 and today, or accept null."""
         if value is None:
             return None
         if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
@@ -32,10 +34,12 @@ class ProfileUpdate(BaseModel):
     @field_validator("gender", mode="before")
     @classmethod
     def allow_undisclosed_gender(cls, value):
+        """Normalize an explicit null to the undisclosed gender option."""
         return "prefer_not_to_say" if value is None else value
 
 
 class PublicProfile(BaseModel):
+    """List the profile fields that an authenticated user may receive."""
     id: str = Field(serialization_alias="_id")
     username: str
     login_username: str | None = None
@@ -50,6 +54,7 @@ class PublicProfile(BaseModel):
 
 
 def public_profile(user: dict) -> PublicProfile:
+    """Project a stored account into the public response without returning secrets."""
     return PublicProfile(
         id=str(user["_id"]), username=user["username"], **public_login_fields(user),
         full_name=user.get("full_name") or user.get("name"),

@@ -13,6 +13,7 @@ async def list_monuments(
     database: AsyncDatabase, *, search: str | None, city: str | None,
     page: int, page_size: int,
 ) -> tuple[list[dict], int]:
+    """Return one page of public cards and the total for the same search filters."""
     filters: dict = {}
     term = re.escape((search or "").strip())
     if term:

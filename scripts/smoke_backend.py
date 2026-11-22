@@ -28,12 +28,14 @@ from virasatguide_backend.data.monuments import slugify
 
 
 def checked(response, expected=200):
+    """Assert an HTTP status and show a short diagnostic when a smoke check fails."""
     if response.status_code != expected:
         raise AssertionError(f"{response.request.method} {response.request.url.path}: expected {expected}, got {response.status_code}: {response.text[:250]}")
     return response
 
 
 def main():
+    """Exercise the real-service flow inside a disposable Atlas database."""
     if not os.getenv("FISH_AUDIO_API_KEY"):
         raise RuntimeError("Set FISH_AUDIO_API_KEY before running the complete smoke test")
     output = Path(os.getenv("QA_OUTPUT_DIR", "/private/tmp/virasat-backend-qa"))
@@ -41,6 +43,7 @@ def main():
     checks = []
 
     def passed(name):
+        """Record a completed smoke check and print its label immediately."""
         checks.append(name)
         print("PASS", name, flush=True)
 
@@ -48,6 +51,7 @@ def main():
         db = app.state.database
 
         async def seed():
+            """Copy the public monument catalogue into the disposable test database."""
             documents = await db.client[SOURCE_DB].monuments.find({}, {"_id": 0}).to_list()
             if not documents:
                 raise RuntimeError("The source monument catalogue is empty")
@@ -125,6 +129,7 @@ def main():
             assert repeated == last
 
             async def stored_history():
+                """Read persisted tour history to verify the database retention limit."""
                 return (await db.tour_sessions.find_one({"_id": tour["session_id"]}))["view"]["history"]
             assert len(api.portal.call(stored_history)) == 3
             passed("real follow-ups, session persistence, three-pair DB retention and retry IDs")
@@ -175,6 +180,7 @@ def main():
             (output / "results.json").write_text(json.dumps({"passed": checks, "temporary_database": QA_DB}, indent=2))
         finally:
             async def cleanup():
+                """Remove data created by this test run."""
                 assert db.name == QA_DB and QA_DB.startswith("virasatguide_qa_")
                 await db.client.drop_database(QA_DB)
             api.portal.call(cleanup)

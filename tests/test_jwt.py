@@ -9,6 +9,7 @@ from virasatguide_backend.data.security import ALGORITHM, create_access_token, g
 
 
 def test_signed_token_claims_and_both_auth_transports(client):
+    """Verify signed token claims and both auth transports."""
     api, users = client
     users.documents['alice'] = {'_id': 'test-id', 'username': 'alice', 'token_version': 1}
     token = create_access_token({'sub': 'alice', 'version': 1})
@@ -25,6 +26,7 @@ def test_signed_token_claims_and_both_auth_transports(client):
 
 @pytest.mark.parametrize('kind', ['wrong-key', 'wrong-algorithm', 'unsigned', 'tampered', 'expired', 'missing-sub', 'missing-version', 'unknown-user', 'revoked'])
 def test_invalid_jwt_cannot_access_profile(client, kind):
+    """Verify invalid JWT cannot access profile."""
     api, users = client
     users.documents['alice'] = {'_id': 'test-id', 'username': 'alice', 'token_version': 2}
     claims = {'sub': 'alice', 'version': 2, 'exp': datetime.now(timezone.utc) + timedelta(minutes=30)}

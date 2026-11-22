@@ -3,7 +3,8 @@
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
-from pymongo.errors import PyMongoError
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError, PyMongoError
 
 from virasatguide_ai_agent import StoryResult, generate_story
 from virasatguide_ai_agent.graph import AgentError
@@ -13,6 +14,7 @@ from virasatguide_backend.data.stories import story_key_for
 
 
 async def get_or_create_story(database, monument_id: int, *, monument=None) -> StoryResult:
+    """Return the cached narration or generate and atomically resolve one saved result."""
     try:
         # A tour session already fetched its monument; other callers look it up here.
         if monument is None:
@@ -32,10 +34,17 @@ async def get_or_create_story(database, monument_id: int, *, monument=None) -> S
             "created_at": datetime.now(timezone.utc),
             "result": result.model_dump(mode="json"),
         }
-        await database.tour_stories.update_one(
-            {"story_key": story_key}, {"$setOnInsert": document}, upsert=True,
-        )
-        return result
+        query = {"story_key": story_key}
+        try:
+            saved = await database.tour_stories.find_one_and_update(
+                query, {"$setOnInsert": document}, upsert=True, return_document=ReturnDocument.AFTER,
+            )
+        except DuplicateKeyError:
+            # Another request saved this story before our upsert completed.
+            saved = await database.tour_stories.find_one(query)
+            if saved is None:
+                raise
+        return StoryResult.model_validate(saved["result"])
     except PyMongoError as exc:
         raise HTTPException(503, "Story storage is unavailable") from exc
     except AgentError as exc:

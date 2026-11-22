@@ -24,9 +24,11 @@ class GoogleOAuthSessionMiddleware:
     """Load the signing key after application configuration is available."""
 
     def __init__(self, app):
+        """Keep the wrapped app so OAuth session settings can be loaded for each request."""
         self.app = app
 
     async def __call__(self, scope, receive, send):
+        """Apply session middleware to Google OAuth routes that need transient state."""
         if scope["type"] != "http":
             return await self.app(scope, receive, send)
         path = scope["path"]
@@ -42,6 +44,7 @@ class GoogleOAuthSessionMiddleware:
 
 
 def get_google_redirect_uri() -> str:
+    """Validate the configured callback URL and require public HTTPS in production."""
     value = os.getenv("GOOGLE_REDIRECT_URI", "").strip()
     parsed = urlsplit(value)
     local = parsed.hostname in {"localhost", "127.0.0.1", "::1"}
@@ -55,6 +58,7 @@ def get_google_redirect_uri() -> str:
 
 
 def get_google_client():
+    """Configure Authlib to use Google's OpenID metadata and PKCE."""
     client_id = os.getenv("GOOGLE_CLIENT_ID", "").strip()
     client_secret = os.getenv("GOOGLE_CLIENT_SECRET", "").strip()
     get_google_redirect_uri()
@@ -82,6 +86,7 @@ async def google_status():
 
 
 def oauth_failure(request: Request, status: int, code: str, message: str):
+    """Clear transient OAuth state and return a safe error to the client or frontend."""
     request.session.clear()
     frontend_url = get_frontend_url()
     if frontend_url:
@@ -94,6 +99,7 @@ def oauth_failure(request: Request, status: int, code: str, message: str):
 
 
 async def start_google_flow(request: Request, google, purpose: str):
+    """Remember which Google flow started and redirect the browser to authorization."""
     request.session["purpose"] = purpose
     try:
         return await google.authorize_redirect(request, get_google_redirect_uri())
@@ -103,6 +109,7 @@ async def start_google_flow(request: Request, google, purpose: str):
 
 @router.get("/login")
 async def google_login(request: Request, google=Depends(get_google_client)):
+    """Start the Google flow for accounts that already exist."""
     return await start_google_flow(request, google, "login")
 
 
@@ -114,10 +121,12 @@ async def google_continue(request: Request, google=Depends(get_google_client)):
 
 @router.get("/signup")
 async def google_signup(request: Request, google=Depends(get_google_client)):
+    """Start the Google flow that allows creation of a new account."""
     return await start_google_flow(request, google, "signup")
 
 
 def signup_required():
+    """Return a signup prompt to a new user who entered through the legacy login route."""
     return HTMLResponse(
         "<html><body><h1>No VirasatGuide account found</h1>"
         "<p>Sign up with this Google account to finish creating your account.</p>"
@@ -153,6 +162,7 @@ def create_login_response(access_token: str):
 async def google_callback(
     request: Request, users=Depends(get_users_collection), google=Depends(get_google_client),
 ):
+    """Verify Google identity, resolve the stable account, and start an application session."""
     try:
         # Authlib verifies state, signature, issuer, audience, expiration and nonce.
         token = await google.authorize_access_token(request)

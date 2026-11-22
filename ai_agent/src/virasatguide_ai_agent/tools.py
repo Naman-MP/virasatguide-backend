@@ -10,6 +10,7 @@ from .models import Source
 
 
 def search_monument(name: str, city: str) -> list[Source]:
+    """Find matching heritage references, trying DuckDuckGo before Bing."""
     query = f"{name} {city} history heritage official tourism"
     for engine in ("duckduckgo", "bing"):
         try:

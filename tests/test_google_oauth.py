@@ -15,6 +15,7 @@ from virasatguide_backend.routes.google_oauth import get_google_client
 
 @pytest.fixture
 def google_flow(client, monkeypatch):
+    """Configure a test OAuth client and signed Google identity fixtures."""
     api, users = client
     monkeypatch.delenv("FRONTEND_URL", raising=False)
     monkeypatch.setenv('GOOGLE_CLIENT_ID', 'test-client')
@@ -37,6 +38,7 @@ def google_flow(client, monkeypatch):
 
 
 def start(api, purpose='login'):
+    """Start the chosen OAuth route and check its state and PKCE parameters."""
     response = api.get(f'/auth/google/{purpose}', follow_redirects=False)
     assert response.status_code == 302
     query = parse_qs(urlsplit(response.headers['location']).query)
@@ -46,6 +48,7 @@ def start(api, purpose='login'):
 
 
 def set_token(google, key, query, **overrides):
+    """Sign a test ID token with the expected nonce and optional claim overrides."""
     claims = dict(iss='https://accounts.google.com', aud='test-client', sub='12345',
                   exp=int(time.time()) + 300, iat=int(time.time()),
                   nonce=query['nonce'][0], email='alice@example.com', email_verified=True)
@@ -56,6 +59,7 @@ def set_token(google, key, query, **overrides):
 
 
 def test_google_login_profile_repeat_and_logout(google_flow):
+    """Verify Google login profile repeat and logout."""
     api, users, google, key = google_flow
     for purpose in ('signup', 'login'):
         query = start(api, purpose)
@@ -74,6 +78,7 @@ def test_google_login_profile_repeat_and_logout(google_flow):
 
 
 def test_new_google_account_must_explicitly_sign_up(google_flow):
+    """Verify new Google account must explicitly sign up."""
     api, users, google, key = google_flow
     query = start(api)
     set_token(google, key, query)
@@ -98,6 +103,7 @@ def test_new_google_account_must_explicitly_sign_up(google_flow):
     {'exp': int(time.time()) - 600}, {'email_verified': False},
 ])
 def test_invalid_identity_is_rejected(google_flow, overrides):
+    """Verify invalid identity is rejected."""
     api, users, google, key = google_flow
     query = start(api)
     set_token(google, key, query, **overrides)
@@ -107,6 +113,7 @@ def test_invalid_identity_is_rejected(google_flow, overrides):
 
 
 def test_wrong_state_and_denial(google_flow):
+    """Verify wrong state and denial."""
     api, users, google, key = google_flow
     start(api)
     assert api.get('/auth/google/callback?code=test&state=wrong').status_code == 400
@@ -116,6 +123,7 @@ def test_wrong_state_and_denial(google_flow):
 
 
 def test_google_configuration_and_reserved_username(client, monkeypatch):
+    """Verify Google configuration and reserved username."""
     api, _ = client
     monkeypatch.delenv('GOOGLE_CLIENT_ID', raising=False)
     assert api.get('/auth/google/login').status_code == 503
@@ -123,6 +131,7 @@ def test_google_configuration_and_reserved_username(client, monkeypatch):
 
 
 def test_invalid_signature_is_rejected(google_flow):
+    """Verify invalid signature is rejected."""
     api, users, google, _ = google_flow
     query = start(api)
     other_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -132,6 +141,7 @@ def test_invalid_signature_is_rejected(google_flow):
 
 
 def test_existing_username_is_not_taken_over(google_flow):
+    """Verify existing username is not taken over."""
     api, users, google, key = google_flow
     users.documents['google:12345'] = {'username': 'google:12345', 'password': 'existing-hash'}
     query = start(api)
@@ -142,6 +152,7 @@ def test_existing_username_is_not_taken_over(google_flow):
 
 
 def test_browser_cookie_redirect_profile_and_logout(google_flow, monkeypatch):
+    """Verify browser cookie redirect profile and logout."""
     api, users, google, key = google_flow
     destination = 'http://127.0.0.1:5173/src/dashboard/index.html'
     monkeypatch.setenv('FRONTEND_URL', destination)
@@ -167,6 +178,7 @@ def test_browser_cookie_redirect_profile_and_logout(google_flow, monkeypatch):
 
 
 def test_unknown_google_account_shows_signup_page_with_frontend_configured(google_flow, monkeypatch):
+    """Verify unknown Google account shows signup page with frontend configured."""
     api, users, google, key = google_flow
     monkeypatch.setenv('FRONTEND_URL', 'http://127.0.0.1:5173/src/dashboard/index.html')
     query = start(api)
@@ -180,6 +192,7 @@ def test_unknown_google_account_shows_signup_page_with_frontend_configured(googl
 
 
 def test_cors_allows_only_configured_frontend(client):
+    """Verify CORS allows only configured frontend."""
     api, _ = client
     response = api.options('/auth/logout', headers={
         'Origin': 'http://127.0.0.1:5173', 'Access-Control-Request-Method': 'POST',
@@ -195,6 +208,7 @@ def test_cors_allows_only_configured_frontend(client):
 
 
 def test_frontend_url_rejects_untrusted_schemes(monkeypatch):
+    """Verify frontend URL rejects untrusted schemes."""
     from virasatguide_backend.data.security import get_frontend_url
     for value in ['javascript:alert(1)', '//attacker.example', 'http://example.com/dashboard', 'https://user:pass@example.com']:
         monkeypatch.setenv('FRONTEND_URL', value)
@@ -204,6 +218,7 @@ def test_frontend_url_rejects_untrusted_schemes(monkeypatch):
 
 
 def test_readiness_without_credentials_returns_no_secrets(client, monkeypatch):
+    """Verify readiness without credentials returns no secrets."""
     api, _ = client
     monkeypatch.delenv('GOOGLE_CLIENT_ID', raising=False)
     monkeypatch.setenv('GOOGLE_CLIENT_SECRET', 'must-never-appear')
@@ -215,6 +230,7 @@ def test_readiness_without_credentials_returns_no_secrets(client, monkeypatch):
 
 
 def test_readiness_with_credentials(client, monkeypatch):
+    """Verify readiness with credentials."""
     api, _ = client
     monkeypatch.setenv('GOOGLE_CLIENT_ID', 'example.apps.googleusercontent.com')
     monkeypatch.setenv('GOOGLE_CLIENT_SECRET', 'must-never-appear')
@@ -229,6 +245,7 @@ def test_readiness_with_credentials(client, monkeypatch):
     ({'code': 'invalid', 'state': 'forged'}, 'invalid'),
 ])
 def test_failed_browser_signin_returns_to_frontend(google_flow, monkeypatch, params, code):
+    """Verify failed browser signin returns to frontend."""
     api, _, google, _ = google_flow
     monkeypatch.setenv('FRONTEND_URL', 'http://127.0.0.1:5173/src/dashboard/index.html')
     start(api)
@@ -240,6 +257,7 @@ def test_failed_browser_signin_returns_to_frontend(google_flow, monkeypatch, par
 
 
 def test_production_rejects_local_or_malformed_callbacks(client, monkeypatch):
+    """Verify production rejects local or malformed callbacks."""
     api, _ = client
     monkeypatch.setenv('VERCEL_ENV', 'production')
     monkeypatch.setenv('GOOGLE_CLIENT_ID', 'test-client')
@@ -255,6 +273,7 @@ def test_production_rejects_local_or_malformed_callbacks(client, monkeypatch):
 
 
 def test_production_callback_and_cross_site_cookie(google_flow, monkeypatch):
+    """Verify production callback and cross site cookie."""
     api, _, google, key = google_flow
     backend = 'https://virasatguide-backend-epsu.vercel.app'
     frontend = 'https://virasat-frontend-nu.vercel.app'
@@ -278,6 +297,7 @@ def test_production_callback_and_cross_site_cookie(google_flow, monkeypatch):
 
 
 def test_unified_google_continue_creates_then_signs_in(google_flow):
+    """Verify unified Google continue creates then signs in."""
     api, users, google, key = google_flow
     for attempt in range(2):
         query = start(api, 'continue')
@@ -293,6 +313,7 @@ def test_unified_google_continue_creates_then_signs_in(google_flow):
 
 
 def test_unified_google_continue_does_not_create_unverified_account(google_flow):
+    """Verify unified Google continue does not create unverified account."""
     api, users, google, key = google_flow
     query = start(api, 'continue')
     set_token(google, key, query, email_verified=False)
@@ -302,6 +323,7 @@ def test_unified_google_continue_does_not_create_unverified_account(google_flow)
 
 @pytest.mark.parametrize('overrides', [{'sub': ''}, {'sub': ' spaced '}, {'email': None}, {'email': 'not-an-email'}, {'email_verified': 'true'}])
 def test_google_continue_requires_valid_subject_and_verified_email(google_flow, overrides):
+    """Verify Google continue requires valid subject and verified email."""
     api, users, google, key = google_flow
     query = start(api, 'continue')
     set_token(google, key, query, **overrides)

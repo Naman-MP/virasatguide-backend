@@ -9,3 +9,5 @@ Set `GEMINI_API_KEY` and optionally `GEMINI_MODEL` (default `gemini-3.5-flash-li
 See the [travel API guide](../docs/travel-api.md) for production setup, fallback behavior and frontend endpoint payloads. Provider keys belong only in backend environment settings.
 
 For a file-by-file explanation, see [the source folder guide](src/virasatguide_ai_agent/README.md). The story flow has no alternate model/search arguments; tests replace network calls with fixtures.
+
+The backend supplies catalogue context to the narration graph and uses the same model provider layer for tour questions and trips. See [source layout](src/README.md) and [research and generation](src/virasatguide_ai_agent/README.md). Configure providers in the backend environment.

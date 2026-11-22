@@ -12,38 +12,49 @@ from virasatguide_backend.main import app
 
 
 class MemoryCursor:
+    """Apply sorting and pagination to a list of fixture documents."""
     def __init__(self, documents):
+        """Initialize the fixture state for the operations used in these tests."""
         self.documents = documents
 
     def sort(self, field, direction):
+        """Order fixture records by the requested field and direction."""
         self.documents.sort(key=lambda item: item[field], reverse=direction < 0)
         return self
 
     def skip(self, count):
+        """Skip records before returning the requested page."""
         self.documents = self.documents[count:]
         return self
 
     def limit(self, count):
+        """Bound the number of records returned by the fixture cursor."""
         self.documents = self.documents[:count]
         return self
 
     async def to_list(self):
+        """Collect fixture cursor results."""
         return copy.deepcopy(self.documents)
 
 
 class MemoryMonuments:
+    """Provide an in-memory catalogue with basic MongoDB matching and projection."""
     def __init__(self, documents):
+        """Initialize the fixture state for the operations used in these tests."""
         self.documents = documents
         self.last_filter = None
 
     async def count_documents(self, query):
+        """Count fixture rows matching the query before pagination."""
         return len(self._matching(query))
 
     async def find_one(self, query, projection):
+        """Return the matching fixture document when it exists."""
         matches = self.find(query, projection).documents
         return copy.deepcopy(matches[0]) if matches else None
 
     def find(self, query, projection):
+        """Return fixture records matching the requested fields."""
         self.last_filter = query
         matches = self._matching(query)
         projected = [
@@ -53,7 +64,9 @@ class MemoryMonuments:
         return MemoryCursor(projected)
 
     def _matching(self, query):
+        """Apply the catalogue's filters to the current fixture rows."""
         def matches(item, conditions):
+            """Apply the subset of MongoDB filters that these fixtures exercise."""
             for field, expected in conditions.items():
                 if field == "$or":
                     if not any(matches(item, clause) for clause in expected):
@@ -68,12 +81,15 @@ class MemoryMonuments:
 
 
 class MemoryDatabase:
+    """Expose the fixture catalogue through a database-like object."""
     def __init__(self, documents):
+        """Initialize the fixture state for the operations used in these tests."""
         self.monuments = MemoryMonuments(documents)
 
 
 @pytest.fixture
 def api():
+    """Provide the test API and fixture state."""
     documents = [
         {"id": 1, "name": "Taj Mahal", "city": "Agra", "location_tag": "Uttar Pradesh, India", "cover_image": "taj.jpg", "reference_text": "private detail"},
         {"id": 2, "name": "Red Fort", "city": "New Delhi", "location_tag": "Delhi, India", "cover_image": "red.jpg", "reference_text": "private detail"},
@@ -89,6 +105,7 @@ def api():
 
 
 def test_list_defaults_and_card_projection(api):
+    """Verify list defaults and card projection."""
     client, _ = api
     response = client.get("/api/v1/monuments")
     assert response.status_code == 200
@@ -109,6 +126,7 @@ def test_list_defaults_and_card_projection(api):
     ("fort", [2]), ("not-found", []),
 ])
 def test_search_matches_name_city_or_location_case_insensitively(api, search, expected):
+    """Verify search matches name city or location case insensitively."""
     client, _ = api
     response = client.get("/api/v1/monuments", params={"search": search})
     assert response.status_code == 200
@@ -117,6 +135,7 @@ def test_search_matches_name_city_or_location_case_insensitively(api, search, ex
 
 
 def test_city_filter_is_case_insensitive_and_exact(api):
+    """Verify city filter is case insensitive and exact."""
     client, _ = api
     response = client.get("/api/v1/monuments", params={"city": "new delhi"})
     assert response.status_code == 200
@@ -125,6 +144,7 @@ def test_city_filter_is_case_insensitive_and_exact(api):
 
 
 def test_search_and_city_filters_combine(api):
+    """Verify search and city filters combine."""
     client, _ = api
     response = client.get("/api/v1/monuments", params={"search": "fort", "city": "New Delhi"})
     assert response.status_code == 200
@@ -132,6 +152,7 @@ def test_search_and_city_filters_combine(api):
 
 
 def test_pagination_is_stable_and_reports_total(api):
+    """Verify pagination is stable and reports total."""
     client, _ = api
     first = client.get("/api/v1/monuments", params={"page": 1, "page_size": 2}).json()
     second = client.get("/api/v1/monuments", params={"page": 2, "page_size": 2}).json()
@@ -142,6 +163,7 @@ def test_pagination_is_stable_and_reports_total(api):
 
 
 def test_past_last_page_returns_empty_list(api):
+    """Verify past last page returns empty list."""
     client, _ = api
     data = client.get("/api/v1/monuments", params={"page": 4, "page_size": 2}).json()
     assert data["items"] == []
@@ -153,13 +175,16 @@ def test_past_last_page_returns_empty_list(api):
     ({"page_size": 51}, 422), ({"search": "x" * 101}, 422), ({"city": "x" * 101}, 422),
 ])
 def test_query_parameter_validation(api, params, expected_status):
+    """Verify query parameter validation."""
     client, _ = api
     assert client.get("/api/v1/monuments", params=params).status_code == expected_status
 
 
 def test_database_error_returns_service_unavailable(monkeypatch):
+    """Verify database error returns service unavailable."""
     db = MemoryDatabase([])
     async def fail(_query):
+        """Raise an intentional storage error to exercise the route's error handling."""
         raise PyMongoError("database unavailable")
     db.monuments.count_documents = fail
     app.dependency_overrides[database.get_database] = lambda: db
@@ -172,6 +197,7 @@ def test_database_error_returns_service_unavailable(monkeypatch):
 
 
 def test_get_monument_detail(api):
+    """Verify get monument detail."""
     client, _ = api
     response = client.get("/api/v1/monuments/2")
     assert response.status_code == 200
@@ -184,18 +210,22 @@ def test_get_monument_detail(api):
 
 @pytest.mark.parametrize("monument_id", ["0", "-1", "abc"])
 def test_get_monument_rejects_invalid_id(api, monument_id):
+    """Verify get monument rejects invalid ID."""
     client, _ = api
     assert client.get(f"/api/v1/monuments/{monument_id}").status_code == 422
 
 
 def test_get_monument_returns_404_for_unknown_id(api):
+    """Verify get monument returns 404 for unknown ID."""
     client, _ = api
     assert client.get("/api/v1/monuments/999").status_code == 404
 
 
 def test_get_monument_handles_database_error(api):
+    """Verify get monument handles database error."""
     client, db = api
     async def fail(_query, _projection):
+        """Raise an intentional storage error to exercise the route's error handling."""
         raise PyMongoError("database unavailable")
     db.monuments.find_one = fail
     response = client.get("/api/v1/monuments/1")
@@ -204,6 +234,7 @@ def test_get_monument_handles_database_error(api):
 
 
 def test_get_monument_by_city_and_name(api):
+    """Verify get monument by city and name."""
     client, db = api
     db.monuments.documents.extend([
         {"id": 5, "name": "Gateway of India", "city": "Mumbai", "location_tag": "Maharashtra, India", "cover_image": "gateway.jpg", "reference_text": "Mumbai landmark"},
@@ -224,6 +255,7 @@ def test_get_monument_by_city_and_name(api):
     "mumbai/unknown-monument", "unknown-city/gateway-of-india",
 ])
 def test_get_monument_by_slugs_returns_404_for_unknown_pair(api, path):
+    """Verify get monument by slugs returns 404 for unknown pair."""
     client, _ = api
     assert client.get(f"/api/v1/monuments/{path}").status_code == 404
 
@@ -232,13 +264,16 @@ def test_get_monument_by_slugs_returns_404_for_unknown_pair(api, path):
     "Mumbai/india-gate", "mumbai/india_gate", "mumbai/" + "a" * 101,
 ])
 def test_get_monument_by_slugs_rejects_invalid_segments(api, path):
+    """Verify get monument by slugs rejects invalid segments."""
     client, _ = api
     assert client.get(f"/api/v1/monuments/{path}").status_code == 422
 
 
 def test_get_monument_by_slugs_handles_database_error(api):
+    """Verify get monument by slugs handles database error."""
     client, db = api
     def fail(_query, _projection):
+        """Raise an intentional storage error to exercise the route's error handling."""
         raise PyMongoError("database unavailable")
     db.monuments.find = fail
     response = client.get("/api/v1/monuments/mumbai/gateway-of-india")

@@ -26,17 +26,22 @@ MONUMENT = {
 
 
 class MemoryStories:
+    """Store story documents in memory using their actual cache keys."""
     def __init__(self):
+        """Initialize the fixture state for the operations used in these tests."""
         self.documents = {}
 
     async def find_one(self, query):
+        """Return the matching fixture document when it exists."""
         return self.documents.get(query["story_key"])
 
-    async def update_one(self, query, update, upsert=False):
-        self.documents.setdefault(query["story_key"], update["$setOnInsert"])
+    async def find_one_and_update(self, query, update, **_):
+        """Apply the fixture's atomic update and return the stored winner."""
+        return self.documents.setdefault(query["story_key"], update["$setOnInsert"])
 
 
 def fake_database():
+    """Build an in-memory monument and story store for route tests."""
     return SimpleNamespace(
         monuments=SimpleNamespace(find_one=AsyncMock(return_value=MONUMENT)),
         tour_stories=MemoryStories(),
@@ -44,6 +49,7 @@ def fake_database():
 
 
 def test_agent_validates_monument_and_story():
+    """Verify agent validates monument and story."""
     with pytest.raises(ValidationError):
         MonumentContext.model_validate({**MONUMENT, "reference_text": "  "})
     with pytest.raises(ValidationError):
@@ -54,6 +60,7 @@ def test_agent_validates_monument_and_story():
 
 @pytest.fixture
 def story_tools(monkeypatch):
+    """Replace external search and generation with deterministic fixtures."""
     generate = AsyncMock(return_value="Known history.")
     monkeypatch.setattr(story_graph, "generate", generate)
     monkeypatch.setattr(story_graph, "search_monument", lambda *_: [])
@@ -61,6 +68,7 @@ def story_tools(monkeypatch):
 
 
 def test_graph_searches_then_writes_using_all_monument_fields(story_tools, monkeypatch):
+    """Verify graph searches then writes using all monument fields."""
     source = Source(title="India Gate history", url="https://example.org/history",
                     snippet="India Gate is in New Delhi.")
     search = lambda name, city: [source] if (name, city) == ("India Gate", "New Delhi") else []
@@ -77,25 +85,31 @@ def test_graph_searches_then_writes_using_all_monument_fields(story_tools, monke
 
 
 def test_graph_uses_database_when_search_has_no_results(story_tools):
+    """Verify graph uses database when search has no results."""
     result = asyncio.run(generate_story(MONUMENT))
     assert result.research_status == "database_only"
     assert result.sources == []
 
 
 def test_graph_rejects_empty_model_output(story_tools):
+    """Verify graph rejects empty model output."""
     story_tools.return_value = "  "
     with pytest.raises(AgentError, match="empty story"):
         asyncio.run(generate_story(MONUMENT))
 
 
 def test_search_prefers_duckduckgo_and_falls_back_to_bing(monkeypatch):
+    """Verify search prefers DuckDuckGo and falls back to Bing."""
     import virasatguide_ai_agent.tools as tools
     from ddgs.exceptions import DDGSException
     engines = []
     class FakeDDGS:
+        """Stand in for web search so engine fallback can be verified offline."""
         def __init__(self, timeout):
+            """Initialize the fixture state for the operations used in these tests."""
             assert timeout == 8
         def text(self, query, **kwargs):
+            """Simulate the search engine response for the requested provider."""
             engines.append(kwargs["backend"])
             if kwargs["backend"] == "duckduckgo":
                 raise DDGSException("no results")
@@ -111,6 +125,7 @@ def test_search_prefers_duckduckgo_and_falls_back_to_bing(monkeypatch):
 
 
 def test_story_endpoint_auth_success_and_missing_monument(monkeypatch):
+    """Verify story endpoint auth success and missing monument."""
     import virasatguide_backend.services.stories as service
     db = fake_database()
     generated = AsyncMock(return_value=StoryResult(
@@ -145,6 +160,7 @@ def test_story_endpoint_auth_success_and_missing_monument(monkeypatch):
 
 
 def test_story_endpoint_accepts_signed_bearer_token(monkeypatch):
+    """Verify story endpoint accepts signed bearer token."""
     import virasatguide_backend.services.stories as service
     from test_auth import Users
     from virasatguide_backend.data.security import create_access_token
@@ -173,6 +189,7 @@ def test_story_endpoint_accepts_signed_bearer_token(monkeypatch):
 
 
 def test_story_text_removes_literal_escapes_and_newlines(story_tools):
+    """Verify story text removes literal escapes and newlines."""
     story_tools.return_value = r'"First line\nSecond\tline"'
     result = asyncio.run(generate_story(MONUMENT))
     assert result.story == "First line Second line"
@@ -180,6 +197,33 @@ def test_story_text_removes_literal_escapes_and_newlines(story_tools):
 
 
 def test_story_text_removes_real_line_breaks_and_controls(story_tools):
+    """Verify story text removes real line breaks and controls."""
     story_tools.return_value = "First line\nSecond\tline\x1b"
     result = asyncio.run(generate_story(MONUMENT))
     assert result.story == "First line Second line"
+
+
+def test_simultaneous_story_requests_return_the_same_saved_story(monkeypatch):
+    """Verify simultaneous story requests return the same saved story."""
+    from virasatguide_backend.services import stories as service
+
+    async def race():
+        """Run two cache misses together to check which narration callers receive."""
+        db = fake_database()
+        ready = asyncio.Barrier(2)
+        results = iter(["First narration.", "Second narration."])
+
+        async def generate(_):
+            """Return different drafts only after both requests have missed the cache."""
+            story = next(results)
+            await ready.wait()
+            return StoryResult(monument_id=7, story=story, sources=[], research_status="database_only")
+
+        monkeypatch.setattr(service, "generate_story", generate)
+        first, second = await asyncio.wait_for(asyncio.gather(
+            service.get_or_create_story(db, 7), service.get_or_create_story(db, 7),
+        ), timeout=5)
+        assert first == second == await service.get_or_create_story(db, 7)
+        assert len(db.tour_stories.documents) == 1
+
+    asyncio.run(race())

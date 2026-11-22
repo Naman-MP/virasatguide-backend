@@ -15,6 +15,7 @@ Database = Annotated[AsyncDatabase, Depends(get_database)]
 
 
 class MonumentCard(BaseModel):
+    """Public discovery and detail fields for a single monument."""
     id: int
     name: str
     city: str
@@ -24,6 +25,7 @@ class MonumentCard(BaseModel):
 
 
 class MonumentPage(BaseModel):
+    """Search results plus total, page number, and page size for pagination."""
     items: list[MonumentCard]
     total: int
     page: int

@@ -14,6 +14,7 @@ from virasatguide_backend.data.credentials import migrate_login_names
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """Open MongoDB, check startup configuration, prepare indexes, and release the connection on shutdown."""
     uri = os.getenv("MONGODB_URI")
     if not uri or "<db_password>" in uri:
         raise RuntimeError("Set MONGODB_URI in .env or the environment before starting.")
@@ -43,6 +44,7 @@ def get_database(request: Request) -> AsyncDatabase:
 
 
 async def is_database_available(database: AsyncDatabase) -> bool:
+    """Check whether MongoDB responds to a ping."""
     try:
         await database.command("ping")
     except PyMongoError:
@@ -52,4 +54,5 @@ async def is_database_available(database: AsyncDatabase) -> bool:
 
 def get_users_collection(request: Request):
     # Reuse the shared connection for authentication.
+    """Return the request's users collection from the shared database connection."""
     return get_database(request).users

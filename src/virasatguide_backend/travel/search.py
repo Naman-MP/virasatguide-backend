@@ -13,6 +13,7 @@ OFFER_LIFETIME = timedelta(minutes=15)
 
 
 async def provider_ready(provider) -> bool:
+    """Run a bounded readiness check and treat upstream errors as unavailability."""
     try:
         return await asyncio.wait_for(provider.is_ready(), timeout=5) is True
     except Exception:
@@ -21,6 +22,7 @@ async def provider_ready(provider) -> bool:
 
 
 def provider_supports(provider, request) -> bool:
+    """Check adapter coverage without exposing its internal failures."""
     try:
         return provider.supports(request) is True
     except Exception:
@@ -28,6 +30,7 @@ def provider_supports(provider, request) -> bool:
 
 
 def check_offer(offer, provider, currency):
+    """Validate attribution, freshness, currency, and booking host before assigning an ID."""
     if offer.provider != provider.name:
         raise ValueError("Provider attribution does not match the adapter")
     age = datetime.now(timezone.utc) - offer.retrieved_at
@@ -45,12 +48,14 @@ def check_offer(offer, provider, currency):
 
 
 def price_order(price):
+    """Rank live quotes first, estimates second, and missing prices last."""
     if price is None:
         return (2, 0)
     return (0 if price.type == "live" else 1, price.amount)
 
 
 async def store_offers(database, owner, request, response, kind):
+    """Save user-owned offer snapshots with their request and expiry."""
     for offer in response.results:
         await database.travel_offers.insert_one({
             "_id": str(offer.id), "owner": owner, "kind": kind,
@@ -61,6 +66,7 @@ async def store_offers(database, owner, request, response, kind):
 
 
 async def search_transport(request, database, owner) -> TransportSearchResult:
+    """Collect and sort compatible provider journeys and report unsupported modes."""
     results, warnings = [], []
     had_failure = False
     for provider in search_providers.transport_providers:
@@ -105,6 +111,7 @@ async def search_transport(request, database, owner) -> TransportSearchResult:
 
 
 async def search_hotels(request, database, owner) -> HotelSearchResult:
+    """Collect and sort compatible lodging offers and report missing inventory."""
     results, warnings = [], []
     had_failure = False
     for provider in search_providers.hotel_providers:

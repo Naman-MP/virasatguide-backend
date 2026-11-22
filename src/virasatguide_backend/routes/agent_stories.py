@@ -25,4 +25,5 @@ async def create_monument_story(
     database=Depends(get_database),
     _user=Depends(get_current_user),
 ) -> StoryResult:
+    """Require authentication and return the monument's saved or newly generated narration."""
     return await get_or_create_story(database, monument_id)

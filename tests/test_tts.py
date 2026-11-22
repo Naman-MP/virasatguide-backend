@@ -18,18 +18,23 @@ MP3 = b"ID3\x04\x00\x00\x00\x00\x00\x00audio"
 
 
 class FakeFishClient:
+    """Supply deterministic audio bytes and record the outgoing Fish Audio request."""
     def __init__(self, response=None, error=None):
+        """Initialize the fixture state for the operations used in these tests."""
         self.response = response
         self.error = error
         self.calls = []
 
     async def __aenter__(self):
+        """Return the fake HTTP client used inside the async context."""
         return self
 
     async def __aexit__(self, *args):
+        """Exit the fake HTTP context after the request."""
         pass
 
     async def post(self, url, **kwargs):
+        """Capture the synthesis request and return the configured test response."""
         self.calls.append((url, kwargs))
         if self.error:
             raise self.error
@@ -37,6 +42,7 @@ class FakeFishClient:
 
 
 def setup_api(monument=MONUMENT, saved=True):
+    """Construct a test API with fixture storage, authentication, and Fish Audio."""
     stories = SimpleNamespace(find_one=AsyncMock(return_value={"result": STORY} if saved else None))
     db = SimpleNamespace(monuments=SimpleNamespace(find_one=AsyncMock(return_value=monument)),
                          tour_stories=stories)
@@ -47,6 +53,7 @@ def setup_api(monument=MONUMENT, saved=True):
 
 
 def test_audio_requires_login_and_valid_id():
+    """Verify audio requires login and valid ID."""
     api, _ = setup_api()
     try:
         app.dependency_overrides.pop(get_current_user)
@@ -58,6 +65,7 @@ def test_audio_requires_login_and_valid_id():
 
 
 def test_audio_requires_monument_and_saved_story(monkeypatch):
+    """Verify audio requires monument and saved story."""
     monkeypatch.setenv("FISH_AUDIO_API_KEY", "test-key")
     api, db = setup_api(monument=None)
     try:
@@ -72,6 +80,7 @@ def test_audio_requires_monument_and_saved_story(monkeypatch):
 
 
 def test_audio_requires_fish_key(monkeypatch):
+    """Verify audio requires Fish Audio key."""
     monkeypatch.delenv("FISH_AUDIO_API_KEY", raising=False)
     api, _ = setup_api()
     try:
@@ -81,6 +90,7 @@ def test_audio_requires_fish_key(monkeypatch):
 
 
 def test_audio_returns_mp3_with_free_model_and_optional_voice(monkeypatch):
+    """Verify audio returns MP3 with free model and optional voice."""
     import virasatguide_backend.routes.tts as route
     monkeypatch.setenv("FISH_AUDIO_API_KEY", "test-key")
     monkeypatch.setenv("FISH_AUDIO_VOICE_ID", "voice-123")
@@ -103,6 +113,7 @@ def test_audio_returns_mp3_with_free_model_and_optional_voice(monkeypatch):
 
 
 def test_audio_handles_provider_failure_and_timeout(monkeypatch):
+    """Verify audio handles provider failure and timeout."""
     import virasatguide_backend.routes.tts as route
     monkeypatch.setenv("FISH_AUDIO_API_KEY", "test-key")
     monkeypatch.delenv("FISH_AUDIO_VOICE_ID", raising=False)
@@ -123,5 +134,6 @@ def test_audio_handles_provider_failure_and_timeout(monkeypatch):
 
 
 def test_audio_openapi_documents_only_binary_mp3():
+    """Verify audio openapi documents only binary MP3."""
     response = app.openapi()["paths"]["/api/v1/monuments/{monument_id}/audio"]["post"]["responses"]["200"]
     assert response["content"] == {"audio/mpeg": {"schema": {"type": "string", "format": "binary"}}}
